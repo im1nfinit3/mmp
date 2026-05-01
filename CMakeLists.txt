@@ -36,6 +36,8 @@ set(SOURCES
     src/main.c
     src/ui.c
     src/playback.c
+    src/database.c
+    src/sqlite/sqlite3-all.c
     ${GRESOURCE_C}
 )
 
@@ -51,6 +53,7 @@ target_link_directories(mmp PRIVATE
 
 target_include_directories(mmp PRIVATE
     include/
+    src/sqlite/
     ${GTK4_INCLUDE_DIRS}
     ${GSTREAMER_INCLUDE_DIRS}
 )

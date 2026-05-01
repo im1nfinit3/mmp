@@ -2,6 +2,56 @@
 #include "ui.h"
 #include <gst/gst.h>
 
+void playback_rebuild_unplayed_pool(MmpApp* app) {
+    if (app->unplayed_pool) {
+        g_list_free(app->unplayed_pool);
+        app->unplayed_pool = NULL;
+    }
+    
+    if (!app->shuffle_mode) return;
+    
+    for (GList* l = app->playlist->head; l != NULL; l = l->next) {
+        // Don't add current track to pool if we just started shuffling
+        if (l != app->current_track_node) {
+            app->unplayed_pool = g_list_append(app->unplayed_pool, l);
+        }
+    }
+}
+
+static GList* playback_get_next_node(MmpApp* app) {
+    if (app->repeat_mode == REPEAT_ONE && app->current_track_node) {
+        return app->current_track_node;
+    }
+    
+    if (app->shuffle_mode) {
+        if (app->unplayed_pool == NULL) {
+            if (app->repeat_mode == REPEAT_ALL || app->current_track_node == NULL) {
+                playback_rebuild_unplayed_pool(app);
+            } else {
+                return NULL;
+            }
+        }
+        
+        if (app->unplayed_pool == NULL) return NULL;
+        
+        int length = g_list_length(app->unplayed_pool);
+        int index = g_random_int_range(0, length);
+        GList* pool_link = g_list_nth(app->unplayed_pool, index);
+        GList* playlist_node = pool_link->data;
+        
+        app->unplayed_pool = g_list_delete_link(app->unplayed_pool, pool_link);
+        return playlist_node;
+    } else {
+        if (app->current_track_node && app->current_track_node->next) {
+            return app->current_track_node->next;
+        } else if (app->repeat_mode == REPEAT_ALL) {
+            return app->playlist->head;
+        }
+    }
+    
+    return NULL;
+}
+
 static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_data) {
     (void)bus;
     MmpApp* app = user_data;
@@ -48,15 +98,17 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
             }
             break;
         }
-        case GST_MESSAGE_EOS:
-            if (app->current_track_node && app->current_track_node->next) {
-                playback_play_track(app, app->current_track_node->next);
+        case GST_MESSAGE_EOS: {
+            GList* next = playback_get_next_node(app);
+            if (next) {
+                playback_play_track(app, next);
                 ui_update_queue(app);
             } else {
                 gst_element_set_state(app->playbin, GST_STATE_READY);
                 gtk_button_set_icon_name(app->play_pause_button, "media-playback-start-symbolic");
             }
             break;
+        }
         case GST_MESSAGE_ERROR: {
             GError* err;
             gchar* debug;
@@ -74,11 +126,30 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
 void playback_init(MmpApp* app) {
     app->playbin = gst_element_factory_make("playbin", "player");
     app->playlist = g_queue_new();
+    app->shuffle_mode = false;
+    app->repeat_mode = REPEAT_OFF;
+    app->unplayed_pool = NULL;
 
     GstBus* bus = gst_element_get_bus(app->playbin);
     gst_bus_add_signal_watch(bus);
     g_signal_connect(bus, "message", G_CALLBACK(playbin_bus_message_cb), app);
     gst_object_unref(bus);
+}
+
+void playback_shuffle_toggle(MmpApp* app) {
+    app->shuffle_mode = !app->shuffle_mode;
+    if (app->shuffle_mode) {
+        playback_rebuild_unplayed_pool(app);
+    } else {
+        if (app->unplayed_pool) {
+            g_list_free(app->unplayed_pool);
+            app->unplayed_pool = NULL;
+        }
+    }
+}
+
+void playback_repeat_toggle(MmpApp* app) {
+    app->repeat_mode = (app->repeat_mode + 1) % 3;
 }
 
 void playback_play_track(MmpApp* app, GList* node) {
@@ -122,19 +193,30 @@ void playback_play_track(MmpApp* app, GList* node) {
     ui_update_queue(app);
 }
 
-void playback_add_to_playlist(MmpApp* app, const char* path, bool play_now) {
-    if (path == NULL) return;
+GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now) {
+    if (path == NULL) return NULL;
     
     g_queue_push_tail(app->playlist, g_strdup(path));
+    GList* new_node = g_queue_peek_tail_link(app->playlist);
+
+    if (app->shuffle_mode && app->unplayed_pool) {
+        app->unplayed_pool = g_list_append(app->unplayed_pool, new_node);
+    }
     
     if (play_now || app->current_track_node == NULL) {
-        playback_play_track(app, g_queue_peek_tail_link(app->playlist));
+        playback_play_track(app, new_node);
     }
     ui_update_queue(app);
+    return new_node;
 }
 
 void playback_open_file(MmpApp* app, const char* path) {
     // Clear playlist and play this file
+    if (app->unplayed_pool) {
+        g_list_free(app->unplayed_pool);
+        app->unplayed_pool = NULL;
+    }
+
     g_queue_foreach(app->playlist, (GFunc)g_free, NULL);
     g_queue_clear(app->playlist);
     app->current_track_node = NULL;
@@ -175,16 +257,43 @@ void playback_play_next(MmpApp* app, const char* path) {
     if (path == NULL) return;
     
     char* path_copy = g_strdup(path);
+    GList* new_node;
     if (app->current_track_node) {
         g_queue_insert_after(app->playlist, app->current_track_node, path_copy);
+        new_node = app->current_track_node->next;
     } else {
         g_queue_push_head(app->playlist, path_copy);
+        new_node = app->playlist->head;
     }
+
+    if (app->shuffle_mode && app->unplayed_pool) {
+        app->unplayed_pool = g_list_append(app->unplayed_pool, new_node);
+    }
+
     ui_update_queue(app);
+}
+
+void playback_skip_next(MmpApp* app) {
+    GList* next = playback_get_next_node(app);
+    if (next) {
+        playback_play_track(app, next);
+    } else {
+        // If we can't skip next (e.g. end of playlist and repeat off), just stop
+        gst_element_set_state(app->playbin, GST_STATE_READY);
+        gtk_button_set_icon_name(app->play_pause_button, "media-playback-start-symbolic");
+    }
 }
 
 void playback_remove_from_playlist(MmpApp* app, GList* node) {
     if (node == NULL) return;
+    
+    // Remove from unplayed pool if it's there
+    if (app->unplayed_pool) {
+        GList* pool_link = g_list_find(app->unplayed_pool, node);
+        if (pool_link) {
+            app->unplayed_pool = g_list_delete_link(app->unplayed_pool, pool_link);
+        }
+    }
     
     bool is_current = (node == app->current_track_node);
     
@@ -204,15 +313,21 @@ void playback_remove_from_playlist(MmpApp* app, GList* node) {
 }
 
 void playback_clear_playlist(MmpApp* app) {
-    GList* l = app->playlist->head;
-    while (l) {
-        GList* next = l->next;
-        if (l != app->current_track_node) {
-            g_free(l->data);
-            g_queue_delete_link(app->playlist, l);
-        }
-        l = next;
+    if (app->unplayed_pool) {
+        g_list_free(app->unplayed_pool);
+        app->unplayed_pool = NULL;
     }
+
+    gst_element_set_state(app->playbin, GST_STATE_READY);
+    app->current_track_node = NULL;
+    g_free(app->current_file_path);
+    app->current_file_path = NULL;
+    gtk_label_set_label(app->current_track_label, "No track playing");
+    gtk_button_set_icon_name(app->play_pause_button, "media-playback-start-symbolic");
+
+    g_queue_foreach(app->playlist, (GFunc)g_free, NULL);
+    g_queue_clear(app->playlist);
+    
     ui_update_queue(app);
 }
 

@@ -7,5 +7,7 @@
 void app_activate_cb(GtkApplication* app);
 void app_open_cb(GtkApplication* app, GFile** files, int n_files, const char* hint, gpointer user_data);
 void ui_update_queue(MmpApp* app);
+void ui_update_playlists(MmpApp* app);
+void ui_refresh_library(MmpApp* app);
 
 #endif // MMP_UI_H

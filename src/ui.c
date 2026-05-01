@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "playback.h"
+#include "database.h"
 
 #include <stdbool.h>
 
@@ -13,6 +14,7 @@ typedef struct {
 } LibraryNavRows;
 
 static void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data);
+static void ui_show_playlist_contents(MmpApp* app, Playlist* p);
 
 static MmpApp* mmp_app = NULL;
 
@@ -99,63 +101,136 @@ static void add_to_library_ui(MmpApp* app, Song* song) {
 }
 
 static void song_properties_cb(GtkWidget* widget, gpointer user_data) {
+    (void)widget;
     Song* song = user_data;
     GtkWindow* parent = mmp_app->window;
-    
+
     char* message = g_strdup_printf(
         "Artist: %s\nAlbum: %s\nPath: %s",
         song->artist, song->album, song->path
     );
-    
+
     GtkAlertDialog* dialog = gtk_alert_dialog_new("%s", song->title);
     gtk_alert_dialog_set_detail(dialog, message);
     gtk_alert_dialog_show(dialog, parent);
     g_object_unref(dialog);
-    
+
     g_free(message);
 }
 
-static void song_play_now_cb(GtkWidget* widget, gpointer user_data) {
+static void song_play_now_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {    (void)action; (void)parameter;
     Song* song = user_data;
     playback_open_file(mmp_app, song->path);
 }
 
-static void song_add_to_queue_cb(GtkWidget* widget, gpointer user_data) {
-    Song* song = user_data;
-    playback_add_to_playlist(mmp_app, song->path, false);
-}
-
-static void song_play_next_cb(GtkWidget* widget, gpointer user_data) {
+static void song_play_next_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
     Song* song = user_data;
     playback_play_next(mmp_app, song->path);
 }
 
-static void show_song_context_menu(Song* song, double x, double y, GtkWidget* parent_row) {
-    GtkWidget* popover = gtk_popover_new();
-    gtk_widget_set_parent(popover, parent_row);
+static void song_add_to_queue_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    Song* song = user_data;
+    playback_add_to_playlist(mmp_app, song->path, false);
+}
+
+static void song_properties_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    Song* song = user_data;
+    // Just reuse the existing callback if possible, or copy logic.
+    // Existing one is song_properties_cb(GtkButton*, gpointer)
+    song_properties_cb(NULL, song);
+}
+
+static void song_add_to_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action;
+    Song* song = user_data;
+    int playlist_id = g_variant_get_int32(parameter);
     
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_popover_set_child(GTK_POPOVER(popover), box);
-    
-    struct { const char* label; GCallback callback; } actions[] = {
-        {"Play Now", G_CALLBACK(song_play_now_cb)},
-        {"Play Next", G_CALLBACK(song_play_next_cb)},
-        {"Add to Queue", G_CALLBACK(song_add_to_queue_cb)},
-        {"Properties", G_CALLBACK(song_properties_cb)},
-    };
-    
-    for (int i = 0; i < 4; i++) {
-        GtkWidget* button = gtk_button_new_with_label(actions[i].label);
-        gtk_widget_add_css_class(button, "flat");
-        gtk_widget_set_halign(button, GTK_ALIGN_START);
-        g_signal_connect(button, "clicked", actions[i].callback, song);
-        g_signal_connect_swapped(button, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
-        gtk_box_append(GTK_BOX(box), button);
+    if (db_add_song_to_playlist(mmp_app->db, playlist_id, song)) {
+        if (mmp_app->current_playlist_id == playlist_id) {
+            // Refresh current playlist view
+            GList* playlists = db_get_playlists(mmp_app->db);
+            for (GList* l = playlists; l != NULL; l = l->next) {
+                Playlist* p = l->data;
+                if (p->id == playlist_id) {
+                    ui_show_playlist_contents(mmp_app, p);
+                    break;
+                }
+            }
+            g_list_free_full(playlists, (GDestroyNotify)free_playlist);
+        }
     }
+}
+
+static void song_remove_from_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    Song* song = user_data;
+    if (db_remove_song_from_playlist(mmp_app->db, mmp_app->current_playlist_id, song->path)) {
+        // Refresh view
+        GList* playlists = db_get_playlists(mmp_app->db);
+        for (GList* l = playlists; l != NULL; l = l->next) {
+            Playlist* p = l->data;
+            if (p->id == mmp_app->current_playlist_id) {
+                ui_show_playlist_contents(mmp_app, p);
+                break;
+            }
+        }
+        g_list_free_full(playlists, (GDestroyNotify)free_playlist);
+    }
+}
+
+static void show_song_context_menu(Song* song, double x, double y, GtkWidget* parent_row) {
+    GtkWidget* parent_list = gtk_widget_get_parent(parent_row);
+    bool in_playlist_view = (parent_list == GTK_WIDGET(mmp_app->playlist_songs_list));
+
+    GSimpleActionGroup* action_group = g_simple_action_group_new();
+    const GActionEntry actions[] = {
+        { "play_now", song_play_now_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "play_next", song_play_next_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "add_queue", song_add_to_queue_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "properties", song_properties_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "add_to_playlist", song_add_to_playlist_action_cb, "i", NULL, NULL, {0, 0, 0} },
+        { "remove_from_playlist", song_remove_from_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(action_group), actions, G_N_ELEMENTS(actions), song);
+    gtk_widget_insert_action_group(parent_row, "song", G_ACTION_GROUP(action_group));
+
+    GMenu* menu = g_menu_new();
+    g_menu_append(menu, "Play Now", "song.play_now");
+    g_menu_append(menu, "Play Next", "song.play_next");
+    g_menu_append(menu, "Add to Queue", "song.add_queue");
+    g_menu_append(menu, "Properties", "song.properties");
+
+    if (in_playlist_view) {
+        g_menu_append(menu, "Remove from Playlist", "song.remove_from_playlist");
+    } else {
+        GList* playlists = db_get_playlists(mmp_app->db);
+        if (playlists) {
+            GMenu* playlist_menu = g_menu_new();
+            for (GList* l = playlists; l != NULL; l = l->next) {
+                Playlist* p = l->data;
+                GMenuItem* item = g_menu_item_new(p->name, NULL);
+                g_menu_item_set_action_and_target(item, "song.add_to_playlist", "i", p->id);
+                g_menu_append_item(playlist_menu, item);
+                g_object_unref(item);
+            }
+            g_menu_append_submenu(menu, "Add to Playlist", G_MENU_MODEL(playlist_menu));
+            g_object_unref(playlist_menu);
+            g_list_free_full(playlists, (GDestroyNotify)free_playlist);
+        }
+    }
+
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    gtk_widget_set_parent(popover, parent_row);
     
     GdkRectangle rect = {(int)x, (int)y, 1, 1};
     gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
     gtk_popover_popup(GTK_POPOVER(popover));
+
+    g_object_unref(menu);
+    g_object_unref(action_group);
 }
 
 static void song_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
@@ -621,9 +696,50 @@ static void track_progress_scale_value_changed_cb(GtkRange* range, gpointer user
     last_seek_time = now;
 }
 
+static void shuffle_clicked_cb(GtkButton* button, gpointer user_data) {
+    (void)button;
+    MmpApp* app = user_data;
+    playback_shuffle_toggle(app);
+    
+    if (app->shuffle_mode) {
+        gtk_widget_add_css_class(GTK_WIDGET(app->shuffle_button), "active-control");
+    } else {
+        gtk_widget_remove_css_class(GTK_WIDGET(app->shuffle_button), "active-control");
+    }
+}
+
+static void repeat_clicked_cb(GtkButton* button, gpointer user_data) {
+    (void)button;
+    MmpApp* app = user_data;
+    playback_repeat_toggle(app);
+    
+    switch (app->repeat_mode) {
+        case REPEAT_OFF:
+            gtk_button_set_icon_name(app->repeat_button, "media-playlist-repeat-symbolic");
+            gtk_widget_remove_css_class(GTK_WIDGET(app->repeat_button), "active-control");
+            break;
+        case REPEAT_ALL:
+            gtk_button_set_icon_name(app->repeat_button, "media-playlist-repeat-symbolic");
+            gtk_widget_add_css_class(GTK_WIDGET(app->repeat_button), "active-control");
+            break;
+        case REPEAT_ONE:
+            gtk_button_set_icon_name(app->repeat_button, "media-playlist-repeat-song-symbolic");
+            gtk_widget_add_css_class(GTK_WIDGET(app->repeat_button), "active-control");
+            break;
+    }
+}
+
 static void previous_track_clicked_cb(GtkButton* button, gpointer user_data) {
     (void)button;
     MmpApp* app = user_data;
+    
+    // If we've played more than 3 seconds, just restart the song
+    gint64 position;
+    if (gst_element_query_position(app->playbin, GST_FORMAT_TIME, &position) && position > 3LL * GST_SECOND) {
+        playback_seek(app, 0);
+        return;
+    }
+
     if (app->current_track_node && app->current_track_node->prev) {
         playback_play_track(app, app->current_track_node->prev);
     }
@@ -632,9 +748,286 @@ static void previous_track_clicked_cb(GtkButton* button, gpointer user_data) {
 static void next_track_clicked_cb(GtkButton* button, gpointer user_data) {
     (void)button;
     MmpApp* app = user_data;
-    if (app->current_track_node && app->current_track_node->next) {
-        playback_play_track(app, app->current_track_node->next);
+    playback_skip_next(app);
+}
+
+typedef void (*EntryCallback)(const char* text, gpointer user_data);
+
+typedef struct {
+    GtkWidget* dialog;
+    GtkWidget* entry;
+    EntryCallback callback;
+    gpointer user_data;
+} DialogData;
+
+static void on_dialog_ok_clicked(GtkButton* btn, gpointer d) {
+    (void)btn;
+    DialogData* dd = (DialogData*)d;
+    dd->callback(gtk_editable_get_text(GTK_EDITABLE(dd->entry)), dd->user_data);
+    gtk_window_destroy(GTK_WINDOW(dd->dialog));
+    g_free(dd);
+}
+
+static void show_entry_dialog(GtkWindow* parent, const char* title, const char* initial_text, EntryCallback callback, gpointer user_data) {
+    GtkWidget* dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), title);
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 300, -1);
+
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 12);
+    gtk_widget_set_margin_end(box, 12);
+    gtk_widget_set_margin_top(box, 12);
+    gtk_widget_set_margin_bottom(box, 12);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+
+    GtkWidget* entry = gtk_entry_new();
+    gtk_editable_set_text(GTK_EDITABLE(entry), initial_text ? initial_text : "");
+    gtk_box_append(GTK_BOX(box), entry);
+
+    GtkWidget* button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(button_box, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), button_box);
+
+    GtkWidget* cancel_button = gtk_button_new_with_label("Cancel");
+    g_signal_connect_swapped(cancel_button, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+    gtk_box_append(GTK_BOX(button_box), cancel_button);
+
+    GtkWidget* ok_button = gtk_button_new_with_label("OK");
+    gtk_widget_add_css_class(ok_button, "suggested-action");
+    gtk_box_append(GTK_BOX(button_box), ok_button);
+
+    DialogData* data = g_new0(DialogData, 1);
+    data->dialog = dialog;
+    data->entry = entry;
+    data->callback = callback;
+    data->user_data = user_data;
+
+    g_signal_connect(ok_button, "clicked", G_CALLBACK(on_dialog_ok_clicked), data);
+    g_signal_connect(entry, "activate", G_CALLBACK(on_dialog_ok_clicked), data);
+
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
+static void on_rename_playlist_done(const char* name, gpointer user_data) {
+    if (!name || strlen(name) == 0) return;
+    GtkListBoxRow* row = user_data;
+    MmpApp* app = mmp_app; 
+    Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
+    if (p && db_rename_playlist(app->db, p->id, name)) {
+        ui_update_playlists(app);
     }
+}
+
+static void on_create_playlist_done(const char* name, gpointer user_data) {
+    if (!name || strlen(name) == 0) return;
+    MmpApp* app = user_data;
+    if (db_create_playlist(app->db, name, NULL)) {
+        ui_update_playlists(app);
+    }
+}
+
+static void rename_action_activated_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    GtkListBoxRow* row = user_data;
+    Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
+    if (p) {
+        show_entry_dialog(GTK_WINDOW(mmp_app->window), "Rename Playlist", p->name, on_rename_playlist_done, row);
+    }
+}
+
+static void remove_action_activated_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    GtkListBoxRow* row = user_data;
+    MmpApp* app = mmp_app;
+    Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
+    if (p && db_delete_playlist(app->db, p->id)) {
+        ui_update_playlists(app);
+    }
+}
+
+static void show_playlist_context_menu(GtkListBoxRow* row, double x, double y) {
+    GSimpleActionGroup* action_group = g_simple_action_group_new();
+    const GActionEntry actions[] = {
+        { "rename", rename_action_activated_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "remove", remove_action_activated_cb, NULL, NULL, NULL, {0, 0, 0} }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(action_group), actions, G_N_ELEMENTS(actions), row);
+    gtk_widget_insert_action_group(GTK_WIDGET(row), "playlist", G_ACTION_GROUP(action_group));
+
+    GMenu* menu = g_menu_new();
+    g_menu_append(menu, "Rename", "playlist.rename");
+    g_menu_append(menu, "Remove", "playlist.remove");
+
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    gtk_widget_set_parent(popover, GTK_WIDGET(row));
+    
+    GdkRectangle rect = {(int)x, (int)y, 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(popover));
+
+    g_object_unref(menu);
+    g_object_unref(action_group);
+}
+
+static void playlist_row_right_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
+    (void)n_press;
+    GtkListBoxRow* row = user_data;
+    show_playlist_context_menu(row, x, y);
+}
+
+static void create_playlist_clicked_cb(GtkButton* button, gpointer user_data) {
+    (void)button;
+    MmpApp* app = user_data;
+    show_entry_dialog(GTK_WINDOW(app->window), "New Playlist", "New Playlist", on_create_playlist_done, app);
+}
+
+static void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    create_playlist_clicked_cb(NULL, user_data);
+}
+
+static void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
+    (void)n_press;
+    MmpApp* app = user_data;
+    GtkWidget* header_row = GTK_WIDGET(g_object_get_data(G_OBJECT(app->window), "nav-playlists-row"));
+
+    GSimpleActionGroup* action_group = g_simple_action_group_new();
+    const GActionEntry actions[] = {
+        { "create", create_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(action_group), actions, G_N_ELEMENTS(actions), app);
+    gtk_widget_insert_action_group(header_row, "playlists", G_ACTION_GROUP(action_group));
+
+    GMenu* menu = g_menu_new();
+    g_menu_append(menu, "Create Playlist", "playlists.create");
+
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    gtk_widget_set_parent(popover, header_row);
+    
+    GdkRectangle rect = {(int)x, (int)y, 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(popover));
+
+    g_object_unref(menu);
+    g_object_unref(action_group);
+}
+
+static void playlist_row_double_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
+    (void)x; (void)y;
+    if (n_press != 2) return;
+    
+    GtkListBoxRow* row = user_data;
+    Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
+    if (!p) return;
+
+    GList* songs = db_get_playlist_songs(mmp_app->db, p->id);
+    if (!songs) return;
+
+    playback_clear_playlist(mmp_app);
+    
+    GList* start_node_ptr = NULL;
+    GList* start_song_data = songs;
+
+    if (mmp_app->shuffle_mode) {
+        int len = g_list_length(songs);
+        int start_idx = g_random_int_range(0, len);
+        start_song_data = g_list_nth(songs, start_idx);
+    }
+
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* s = l->data;
+        // Add all songs without auto-play first
+        GList* added_node = playback_add_to_playlist(mmp_app, s->path, false);
+        if (l == start_song_data) {
+            start_node_ptr = added_node;
+        }
+    }
+    
+    // Now play the intended one
+    if (start_node_ptr) {
+        playback_play_track(mmp_app, start_node_ptr);
+    }
+    
+    g_list_free_full(songs, (GDestroyNotify)free_song);
+}
+
+static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
+    app->current_playlist_id = p->id;
+    // Clear playlist_songs_list
+    GtkWidget* child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->playlist_songs_list))) != NULL) {
+        gtk_list_box_remove(app->playlist_songs_list, child);
+    }
+
+    GList* songs = db_get_playlist_songs(app->db, p->id);
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* s = l->data;
+        GtkWidget* row = gtk_list_box_row_new();
+        GtkWidget* label = gtk_label_new(s->title);
+        gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_widget_set_margin_start(label, 12);
+        gtk_widget_set_margin_top(label, 8);
+        gtk_widget_set_margin_bottom(label, 8);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+        g_object_set_data_full(G_OBJECT(row), "song-data", s, (GDestroyNotify)free_song);
+        gtk_list_box_append(app->playlist_songs_list, row);
+
+        GtkGesture* gesture = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+        g_signal_connect(gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
+        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
+    }
+    g_list_free(songs);
+}
+
+void ui_update_playlists(MmpApp* app) {
+    GtkWidget* nav_list = GTK_WIDGET(app->navigation_list);
+    if (!nav_list) return;
+
+    GtkWidget* child = gtk_widget_get_first_child(nav_list);
+    while (child) {
+        GtkWidget* next = gtk_widget_get_next_sibling(child);
+        if (g_object_get_data(G_OBJECT(child), "is-playlist-row")) {
+            gtk_list_box_remove(GTK_LIST_BOX(nav_list), child);
+        }
+        child = next;
+    }
+
+    GtkWidget* header_row = GTK_WIDGET(g_object_get_data(G_OBJECT(app->window), "nav-playlists-row"));
+    if (!header_row) return;
+    int index = gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(header_row));
+
+    GList* playlists = db_get_playlists(app->db);
+    int i = 1;
+    for (GList* l = playlists; l != NULL; l = l->next) {
+        Playlist* p = l->data;
+        GtkWidget* row = gtk_list_box_row_new();
+        g_object_set_data(G_OBJECT(row), "is-playlist-row", GINT_TO_POINTER(1));
+        g_object_set_data(G_OBJECT(row), "stack-page", (gpointer)"playlists");
+        g_object_set_data_full(G_OBJECT(row), "playlist", p, (GDestroyNotify)free_playlist);
+        
+        GtkWidget* label = gtk_label_new(p->name);
+        gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_widget_set_margin_start(label, 24);
+        gtk_widget_set_margin_top(label, 12);
+        gtk_widget_set_margin_bottom(label, 12);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+        gtk_widget_add_css_class(row, "nav-sub-row");
+
+        gtk_list_box_insert(GTK_LIST_BOX(nav_list), row, index + i++);
+
+        GtkGesture* right_click = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
+        g_signal_connect(right_click, "released", G_CALLBACK(playlist_row_right_clicked_cb), row);
+        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(right_click));
+
+        GtkGesture* double_click = gtk_gesture_click_new();
+        g_signal_connect(double_click, "released", G_CALLBACK(playlist_row_double_clicked_cb), row);
+        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(double_click));
+    }
+    g_list_free(playlists);
 }
 
 static void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data) {
@@ -664,6 +1057,13 @@ static void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row,
 
     const char* page_name = g_object_get_data(G_OBJECT(row), "stack-page");
     if (page_name != NULL) {
+        if (g_object_get_data(G_OBJECT(row), "is-playlist-row")) {
+            Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
+            if (p) {
+                ui_show_playlist_contents(mmp_app, p);
+            }
+        }
+
         gtk_stack_set_visible_child_name(rows->stack, page_name);
         
         // Clear filters on manual navigation to show everything
@@ -713,6 +1113,13 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app = g_new0(MmpApp, 1);
     playback_init(mmp_app);
 
+    char* config_dir = g_build_filename(g_get_user_config_dir(), "mmp", NULL);
+    g_mkdir_with_parents(config_dir, 0755);
+    char* db_path = g_build_filename(config_dir, "playlists.db", NULL);
+    db_init(db_path, &mmp_app->db);
+    g_free(db_path);
+    g_free(config_dir);
+
     GtkBuilder* builder = gtk_builder_new_from_resource("/xyz/_1nfinit3/mmp/ui/window.ui");
     mmp_app->window = GTK_WINDOW(gtk_builder_get_object(builder, "main_window"));
     
@@ -721,11 +1128,14 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app->duration_label = GTK_LABEL(gtk_builder_get_object(builder, "duration_label"));
     mmp_app->track_progress_scale = GTK_SCALE(gtk_builder_get_object(builder, "track_progress_scale"));
     mmp_app->play_pause_button = GTK_BUTTON(gtk_builder_get_object(builder, "play_pause_button"));
+    mmp_app->shuffle_button = GTK_BUTTON(gtk_builder_get_object(builder, "shuffle_button"));
+    mmp_app->repeat_button = GTK_BUTTON(gtk_builder_get_object(builder, "repeat_button"));
     mmp_app->songs_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "songs_list"));
     mmp_app->recently_added_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "recently_added_list"));
     mmp_app->albums_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "albums_list"));
     mmp_app->artists_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "artists_list"));
     mmp_app->queue_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "queue_list"));
+    mmp_app->playlist_songs_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "playlist_songs_list"));
     mmp_app->songs_search_entry = GTK_SEARCH_ENTRY(gtk_builder_get_object(builder, "songs_search_entry"));
 
     gtk_list_box_set_filter_func(mmp_app->songs_list, filter_songs_cb, mmp_app, NULL);
@@ -736,6 +1146,7 @@ void app_activate_cb(GtkApplication* app) {
     g_signal_connect(mmp_app->albums_list, "row-activated", G_CALLBACK(album_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->artists_list, "row-activated", G_CALLBACK(artist_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->queue_list, "row-activated", G_CALLBACK(queue_row_activated_cb), mmp_app);
+    g_signal_connect(mmp_app->playlist_songs_list, "row-activated", G_CALLBACK(song_row_activated_cb), mmp_app);
 
     GtkButton* prev_button = GTK_BUTTON(gtk_builder_get_object(builder, "previous_track_button"));
     GtkButton* next_button = GTK_BUTTON(gtk_builder_get_object(builder, "next_track_button"));
@@ -744,6 +1155,16 @@ void app_activate_cb(GtkApplication* app) {
     GtkStack* content_stack = GTK_STACK(gtk_builder_get_object(builder, "content_stack"));
     mmp_app->navigation_list = navigation_list;
     mmp_app->content_stack = content_stack;
+
+    GtkListBoxRow* nav_playlists_row = navigation_row(builder, "nav_playlists_row", "playlists");
+    g_object_set_data(G_OBJECT(mmp_app->window), "nav-playlists-row", nav_playlists_row);
+
+    GtkGesture* playlists_right_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(playlists_right_click), GDK_BUTTON_SECONDARY);
+    g_signal_connect(playlists_right_click, "released", G_CALLBACK(playlists_header_right_clicked_cb), mmp_app);
+    gtk_widget_add_controller(GTK_WIDGET(nav_playlists_row), GTK_EVENT_CONTROLLER(playlists_right_click));
+
+    ui_update_playlists(mmp_app);
     
     GtkWidget* volume_controls = GTK_WIDGET(gtk_builder_get_object(builder, "volume_controls"));
     GtkRevealer* volume_revealer = GTK_REVEALER(gtk_builder_get_object(builder, "volume_revealer"));
@@ -781,6 +1202,8 @@ void app_activate_cb(GtkApplication* app) {
     gtk_widget_add_controller(volume_controls, volume_motion);
     
     g_signal_connect(mute_button, "clicked", G_CALLBACK(mute_button_clicked_cb), NULL);
+    g_signal_connect(mmp_app->shuffle_button, "clicked", G_CALLBACK(shuffle_clicked_cb), mmp_app);
+    g_signal_connect(mmp_app->repeat_button, "clicked", G_CALLBACK(repeat_clicked_cb), mmp_app);
     g_signal_connect(mmp_app->play_pause_button, "clicked", G_CALLBACK(play_pause_clicked_cb), mmp_app);
     g_signal_connect(prev_button, "clicked", G_CALLBACK(previous_track_clicked_cb), mmp_app);
     g_signal_connect(next_button, "clicked", G_CALLBACK(next_track_clicked_cb), mmp_app);

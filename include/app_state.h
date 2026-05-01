@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <gst/gst.h>
+#include "sqlite3.h"
 
 typedef struct {
     char* path;
@@ -11,6 +12,12 @@ typedef struct {
     char* album;
 } Song;
 
+typedef enum {
+    REPEAT_OFF,
+    REPEAT_ALL,
+    REPEAT_ONE
+} RepeatMode;
+
 typedef struct {
     GtkWindow* window;
     GtkLabel* current_track_label;
@@ -18,11 +25,14 @@ typedef struct {
     GtkLabel* duration_label;
     GtkScale* track_progress_scale;
     GtkButton* play_pause_button;
+    GtkButton* shuffle_button;
+    GtkButton* repeat_button;
     GtkListBox* songs_list;
     GtkListBox* recently_added_list;
     GtkListBox* albums_list;
     GtkListBox* artists_list;
     GtkListBox* queue_list;
+    GtkListBox* playlist_songs_list;
     GtkSearchEntry* songs_search_entry;
     GstElement* playbin;
     char* current_file_path;
@@ -35,6 +45,11 @@ typedef struct {
     char* selected_album_filter;
     GtkStack* content_stack;
     GtkListBox* navigation_list;
+    bool shuffle_mode;
+    RepeatMode repeat_mode;
+    GList* unplayed_pool;
+    sqlite3* db;
+    int current_playlist_id;
 } MmpApp;
 
 #endif // MMP_APP_STATE_H

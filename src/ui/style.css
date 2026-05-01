@@ -82,6 +82,12 @@ button.volume-button:active {
   border-color: #8a8a8a;
 }
 
+button.playback-button.active-control {
+  background: #4a4a4a;
+  border-color: #808080;
+  color: #ffffff;
+}
+
 scale trough {
   min-height: 10px;
   border-radius: 999px;

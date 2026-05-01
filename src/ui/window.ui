@@ -59,6 +59,30 @@
                     </style>
                   </object>
                 </child>
+                <child>
+                  <object class="GtkButton" id="repeat_button">
+                    <property name="icon-name">media-playlist-repeat-symbolic</property>
+                    <property name="tooltip-text">Repeat</property>
+                    <property name="width-request">36</property>
+                    <property name="height-request">36</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="playback-button"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="shuffle_button">
+                    <property name="icon-name">media-playlist-shuffle-symbolic</property>
+                    <property name="tooltip-text">Shuffle</property>
+                    <property name="width-request">36</property>
+                    <property name="height-request">36</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="playback-button"/>
+                    </style>
+                  </object>
+                </child>
               </object>
             </child>
             <child>
@@ -550,9 +574,17 @@
                           <class name="content-page"/>
                         </style>
                         <child>
-                          <object class="GtkButton">
-                            <property name="label">Create Playlist</property>
-                            <property name="halign">start</property>
+                          <object class="GtkScrolledWindow">
+                            <property name="vexpand">true</property>
+                            <property name="child">
+                              <object class="GtkListBox" id="playlist_songs_list">
+                                <property name="selection-mode">single</property>
+                                <style>
+                                  <class name="library-list"/>
+                                  <class name="boxed-list"/>
+                                </style>
+                              </object>
+                            </property>
                           </object>
                         </child>
                       </object>
