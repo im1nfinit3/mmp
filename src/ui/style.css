@@ -1,0 +1,152 @@
+window {
+  color: #f2f2f2;
+  background: #171717;
+}
+
+.app-root {
+  background: #171717;
+}
+
+.playback-bar {
+  background: #222222;
+  padding: 8px 12px;
+}
+
+.main-shell {
+  background: #171717;
+}
+
+.nav-pane {
+  background: #111111;
+}
+
+button.nav-section-button {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #dddddd;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+button.nav-section-button:hover {
+  background: #252525;
+}
+
+button.nav-section-button:checked {
+  color: #ffffff;
+  background: #222222;
+}
+
+.content-stack {
+  background: #1d1d1d;
+}
+
+.content-page {
+  background: #1d1d1d;
+}
+
+.page-title {
+  color: #f7f7f7;
+}
+
+.track-info {
+  color: #eeeeee;
+}
+
+.time-label {
+  color: #c9c9c9;
+}
+
+button.playback-button,
+button.volume-button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 6px;
+  color: #f5f5f5;
+  background: #292929;
+  border: 1px solid #464646;
+}
+
+button.playback-button:hover,
+button.volume-button:hover {
+  background: #343434;
+  border-color: #666666;
+}
+
+button.playback-button:checked,
+button.playback-button:active,
+button.volume-button:active {
+  background: #5a5a5a;
+  border-color: #8a8a8a;
+}
+
+scale trough {
+  min-height: 10px;
+  border-radius: 999px;
+  background: #3a3a3a;
+}
+
+scale highlight {
+  border-radius: 999px;
+  background: #a0a0a0;
+}
+
+scale slider {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+entry {
+  color: #eeeeee;
+  background: #121212;
+  border: 1px solid #555555;
+  border-radius: 6px;
+}
+
+list.navigation-list {
+  background: transparent;
+}
+
+list.navigation-list row {
+  min-height: 44px;
+  color: #dddddd;
+  background: transparent;
+}
+
+list.navigation-list row.nav-sub-row {
+  background: #1c1c1c;
+}
+
+list.navigation-list row:hover {
+  background: #252525;
+}
+
+list.navigation-list row:selected {
+  color: #ffffff;
+  background: #5a5a5a;
+}
+
+.library-panel {
+  background: #111111;
+}
+
+.library-panel entry {
+  margin: 12px;
+}
+
+list.library-list,
+list.library-list row {
+  color: #eeeeee;
+  background: #111111;
+}
+
+list.library-list row:hover {
+  background: #242424;
+}
