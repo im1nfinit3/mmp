@@ -126,8 +126,21 @@ list.navigation-list row {
   background: transparent;
 }
 
-list.navigation-list row.nav-sub-row {
-  background: #1c1c1c;
+list.navigation-list row.nav-header {
+    background: transparent;
+    opacity: 0.6;
+}
+
+.nav-header label {
+    font-weight: bold;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    margin-top: 16px;
+    margin-bottom: 4px;
+}
+
+.nav-sub-row {
+  background: #606060;
 }
 
 list.navigation-list row:hover {

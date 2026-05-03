@@ -615,7 +615,7 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app->navigation_list = navigation_list;
     mmp_app->content_stack = content_stack;
 
-    GtkListBoxRow* nav_playlists_row = navigation_row(builder, "nav_playlists_row", "songs-view");
+    GtkListBoxRow* nav_playlists_row = GTK_LIST_BOX_ROW(gtk_builder_get_object(builder, "nav_playlists_row"));
     g_object_set_data(G_OBJECT(mmp_app->window), "nav-playlists-row", nav_playlists_row);
 
     GtkGesture* playlists_right_click = gtk_gesture_click_new();
