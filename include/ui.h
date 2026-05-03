@@ -12,6 +12,7 @@ void ui_clear_filters(MmpApp* app);
 void ui_add_filter(MmpApp* app, SongFilterFunc func, gpointer data, GDestroyNotify notify);
 void ui_set_view(MmpApp* app, GList* base_list, bool owned, bool reverse);
 void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool reverse);
+GList* ui_get_filtered_songs(MmpApp* app);
 void ui_refresh_view(MmpApp* app);
 bool search_filter_func(Song* song, gpointer user_data);
 bool artist_filter_func(Song* song, gpointer user_data);

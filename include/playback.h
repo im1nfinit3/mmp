@@ -6,6 +6,7 @@
 void playback_init(MmpApp* app);
 void playback_play_track(MmpApp* app, GList* node);
 GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now);
+void playback_add_songs_to_playlist(MmpApp* app, GList* songs);
 void playback_open_file(MmpApp* app, const char* path);
 void playback_toggle_pause(MmpApp* app);
 void playback_seek(MmpApp* app, double seconds);

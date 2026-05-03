@@ -39,6 +39,7 @@ void playlist_row_right_clicked_cb(GtkGestureClick* gesture, int n_press, double
 void playlist_row_double_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
 void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
 void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data);
+void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data);
 gboolean on_drop_cb(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
 
 #endif // MMP_UI_CALLBACKS_H

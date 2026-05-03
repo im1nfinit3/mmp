@@ -118,7 +118,7 @@ void ui_update_queue(MmpApp* app) {
         // Add queue-specific controllers
         GtkGesture* gesture = gtk_gesture_click_new();
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-        g_signal_connect(gesture, "pressed", G_CALLBACK(queue_row_secondary_click_cb), NULL);
+        g_signal_connect(gesture, "released", G_CALLBACK(queue_row_secondary_click_cb), NULL);
         gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 
         GtkDragSource* drag_source = gtk_drag_source_new();
@@ -220,13 +220,15 @@ void ui_add_filter(MmpApp* app, SongFilterFunc func, gpointer data, GDestroyNoti
 }
 
 void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool reverse) {
-    if (!list || !base_list) return;
+    if (!list) return;
 
     // Clear the list
     GtkWidget* child;
     while ((child = gtk_widget_get_first_child(GTK_WIDGET(list))) != NULL) {
         gtk_list_box_remove(list, child);
     }
+
+    if (!base_list) return;
 
     GList* songs = base_list;
     if (reverse) {
@@ -254,6 +256,42 @@ void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool 
     if (reverse) {
         g_list_free(songs);
     }
+}
+
+GList* ui_get_filtered_songs(MmpApp* app) {
+    if (!app->current_view_base_list) return NULL;
+
+    GList* songs = app->current_view_base_list;
+    bool reverse = app->current_view_reverse;
+    
+    if (reverse) {
+        songs = g_list_copy(songs);
+        songs = g_list_reverse(songs);
+    }
+
+    GList* filtered = NULL;
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* song = l->data;
+        bool pass = true;
+
+        for (GList* f = app->current_view_filters; f != NULL; f = f->next) {
+            SongFilter* filter = f->data;
+            if (!filter->filter(song, filter->user_data)) {
+                pass = false;
+                break;
+            }
+        }
+
+        if (pass) {
+            filtered = g_list_prepend(filtered, song);
+        }
+    }
+
+    if (reverse) {
+        g_list_free(songs);
+    }
+    
+    return g_list_reverse(filtered);
 }
 
 void ui_refresh_view(MmpApp* app) {
@@ -312,7 +350,7 @@ void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend
 
     GtkGesture* gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
+    g_signal_connect(gesture, "released", G_CALLBACK(song_row_secondary_click_cb), NULL);
     gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 }
 
@@ -797,6 +835,11 @@ void app_activate_cb(GtkApplication* app) {
     gtk_stack_add_titled(mmp_app->content_stack, settings_page_box, "settings", "Settings");
 
     // Signal Connections & Setup
+    const GActionEntry app_actions[] = {
+        { "create-playlist", create_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), mmp_app);
+
     // Load cached library
     GList* cached_songs = db_get_all_songs(mmp_app->library_db);
     for (GList* l = cached_songs; l != NULL; l = l->next) {
