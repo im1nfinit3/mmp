@@ -163,6 +163,9 @@ void playback_get_metadata(MmpApp* app, Song* song) {
             seconds %= 60;
             g_free(song->duration_str);
             song->duration_str = g_strdup_printf("%d:%02d", minutes, seconds);
+            g_print("Extracted duration for %s: %s\n", song->path, song->duration_str);
+        } else {
+            g_print("Duration not valid for %s\n", song->path);
         }
 
         const GstTagList* tags = gst_discoverer_info_get_tags(info);

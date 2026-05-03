@@ -13,6 +13,14 @@ static bool execute_sql(sqlite3* db, const char* sql) {
     return true;
 }
 
+static void bind_text_or_null(sqlite3_stmt* stmt, int index, const char* text) {
+    if (text) {
+        sqlite3_bind_text(stmt, index, text, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, index);
+    }
+}
+
 bool db_init(const char* db_path, sqlite3** db_out) {
     int rc = sqlite3_open(db_path, db_out);
     if (rc != SQLITE_OK) {
@@ -46,7 +54,7 @@ bool db_init(const char* db_path, sqlite3** db_out) {
     if (!execute_sql(*db_out, schema)) return false;
 
     // Migration: add duration_str column if it doesn't exist
-    execute_sql(*db_out, "ALTER TABLE songs ADD COLUMN duration_str TEXT;");
+    sqlite3_exec(*db_out, "ALTER TABLE songs ADD COLUMN duration_str TEXT;", NULL, NULL, NULL);
 
     return true;
 }
@@ -126,10 +134,10 @@ static int get_or_insert_song(sqlite3* db, const Song* song) {
         return -1;
     }
     sqlite3_bind_text(insert_stmt, 1, song->path, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 2, song->title, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 3, song->artist, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 4, song->album, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 5, song->duration_str, -1, SQLITE_STATIC);
+    bind_text_or_null(insert_stmt, 2, song->title);
+    bind_text_or_null(insert_stmt, 3, song->artist);
+    bind_text_or_null(insert_stmt, 4, song->album);
+    bind_text_or_null(insert_stmt, 5, song->duration_str);
 
     if (sqlite3_step(insert_stmt) == SQLITE_DONE) {
         song_id = (int)sqlite3_last_insert_rowid(db);
@@ -229,10 +237,10 @@ bool db_save_song(sqlite3* db, const Song* song) {
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
 
     sqlite3_bind_text(stmt, 1, song->path, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, song->title, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, song->artist, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, song->album, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 5, song->duration_str, -1, SQLITE_STATIC);
+    bind_text_or_null(stmt, 2, song->title);
+    bind_text_or_null(stmt, 3, song->artist);
+    bind_text_or_null(stmt, 4, song->album);
+    bind_text_or_null(stmt, 5, song->duration_str);
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);

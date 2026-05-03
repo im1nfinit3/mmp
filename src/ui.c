@@ -161,18 +161,19 @@ GtkWidget* create_song_row_box(Song* song) {
     GtkWidget* artist_label = gtk_label_new(song->artist);
     gtk_widget_add_css_class(artist_label, "dim-label");
     gtk_label_set_ellipsize(GTK_LABEL(artist_label), PANGO_ELLIPSIZE_START);
-    gtk_label_set_max_width_chars(GTK_LABEL(artist_label), 20);
+    gtk_label_set_max_width_chars(GTK_LABEL(artist_label), 15);
     gtk_box_append(GTK_BOX(box), artist_label);
 
     GtkWidget* album_label = gtk_label_new(song->album);
     gtk_widget_add_css_class(album_label, "dim-label");
     gtk_label_set_ellipsize(GTK_LABEL(album_label), PANGO_ELLIPSIZE_START);
-    gtk_label_set_max_width_chars(GTK_LABEL(album_label), 20);
+    gtk_label_set_max_width_chars(GTK_LABEL(album_label), 15);
     gtk_box_append(GTK_BOX(box), album_label);
 
     if (song->duration_str) {
         GtkWidget* duration_label = gtk_label_new(song->duration_str);
         gtk_widget_add_css_class(duration_label, "dim-label");
+        gtk_widget_set_size_request(duration_label, 40, -1);
         gtk_box_append(GTK_BOX(box), duration_label);
     }
 
@@ -222,6 +223,33 @@ static gboolean add_song_idle_cb(gpointer user_data) {
     return FALSE;
 }
 
+static gboolean update_song_ui_idle_cb(gpointer user_data) {
+    SongUpdateData* data = user_data;
+    GtkListBox* lists[] = {data->app->songs_list, data->app->recently_added_list, data->app->playlist_songs_list, NULL};
+    
+    for (int i = 0; i < 3; i++) {
+        if (!lists[i]) continue;
+        GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(lists[i]));
+        while (child) {
+            Song* s = g_object_get_data(G_OBJECT(child), "song-data");
+            if (s && g_strcmp0(s->path, data->song->path) == 0) {
+                if (s != data->song) {
+                    g_free(s->title); s->title = g_strdup(data->song->title);
+                    g_free(s->artist); s->artist = g_strdup(data->song->artist);
+                    g_free(s->album); s->album = g_strdup(data->song->album);
+                    g_free(s->duration_str); s->duration_str = g_strdup(data->song->duration_str);
+                }
+                
+                GtkWidget* new_box = create_song_row_box(s);
+                gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(child), new_box);
+            }
+            child = gtk_widget_get_next_sibling(child);
+        }
+    }
+    g_free(data);
+    return FALSE;
+}
+
 static void scan_directory_recursive(MmpApp* app, const char* path, GHashTable* existing_paths) {
     GFile* dir = g_file_new_for_path(path);
     GFileEnumerator* enumerator = g_file_enumerate_children(dir, "standard::*", G_FILE_QUERY_INFO_NONE, NULL, NULL);
@@ -239,7 +267,8 @@ static void scan_directory_recursive(MmpApp* app, const char* path, GHashTable* 
                        g_str_has_suffix(name, ".ogg") || g_str_has_suffix(name, ".wav") ||
                        g_str_has_suffix(name, ".m4a")) {
                 
-                if (!g_hash_table_contains(existing_paths, child_path)) {
+                Song* existing_song = g_hash_table_lookup(existing_paths, child_path);
+                if (!existing_song) {
                     Song* song = g_new0(Song, 1);
                     song->path = g_strdup(child_path);
                     
@@ -276,6 +305,16 @@ static void scan_directory_recursive(MmpApp* app, const char* path, GHashTable* 
                     
                     if (grand_parent) g_object_unref(grand_parent);
                     if (parent) g_object_unref(parent);
+                } else if (existing_song->duration_str == NULL) {
+                    playback_get_metadata(app, existing_song);
+                    if (existing_song->duration_str) {
+                        db_save_song(app->library_db, existing_song);
+                        
+                        SongUpdateData* update_data = g_new0(SongUpdateData, 1);
+                        update_data->app = app;
+                        update_data->song = existing_song;
+                        g_idle_add(update_song_ui_idle_cb, update_data);
+                    }
                 }
             }
 
@@ -295,7 +334,7 @@ static void scan_directory_thread(GTask* task, gpointer source_object, gpointer 
     GHashTable* existing_paths = g_hash_table_new(g_str_hash, g_str_equal);
     for (GList* l = app->library; l != NULL; l = l->next) {
         Song* s = l->data;
-        g_hash_table_add(existing_paths, s->path);
+        g_hash_table_insert(existing_paths, s->path, s);
     }
 
     const char* music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);

@@ -36,6 +36,7 @@ static void free_song(Song* song) {
     g_free(song->title);
     g_free(song->artist);
     g_free(song->album);
+    g_free(song->duration_str);
     g_free(song);
 }
 
