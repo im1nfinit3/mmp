@@ -35,6 +35,7 @@ add_custom_command(
 set(SOURCES
     src/main.c
     src/ui.c
+    src/ui_callbacks.c
     src/playback.c
     src/database.c
     src/sqlite/sqlite3-all.c
