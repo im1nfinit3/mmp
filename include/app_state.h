@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <gst/gst.h>
+#include <gst/pbutils/pbutils.h>
 #include "sqlite3.h"
 
 typedef struct {
@@ -35,6 +36,7 @@ typedef struct {
     GtkListBox* playlist_songs_list;
     GtkSearchEntry* songs_search_entry;
     GstElement* playbin;
+    GstDiscoverer* discoverer;
     char* current_file_path;
     GQueue* playlist;
     GList* current_track_node;

@@ -1,6 +1,7 @@
 #include "playback.h"
 #include "ui.h"
 #include <gst/gst.h>
+#include <gst/pbutils/pbutils.h>
 
 void playback_rebuild_unplayed_pool(MmpApp* app) {
     if (app->unplayed_pool) {
@@ -130,10 +131,68 @@ void playback_init(MmpApp* app) {
     app->repeat_mode = REPEAT_OFF;
     app->unplayed_pool = NULL;
 
+    GError* err = NULL;
+    app->discoverer = gst_discoverer_new(2 * GST_SECOND, &err);
+    if (err) {
+        g_warning("Could not create GstDiscoverer: %s", err->message);
+        g_error_free(err);
+    }
+
     GstBus* bus = gst_element_get_bus(app->playbin);
     gst_bus_add_signal_watch(bus);
     g_signal_connect(bus, "message", G_CALLBACK(playbin_bus_message_cb), app);
     gst_object_unref(bus);
+}
+
+void playback_get_metadata(MmpApp* app, Song* song) {
+    if (!app->discoverer) return;
+
+    char* uri = g_filename_to_uri(song->path, NULL, NULL);
+    if (!uri) return;
+
+    GError* err = NULL;
+    GstDiscovererInfo* info = gst_discoverer_discover_uri(app->discoverer, uri, &err);
+
+    if (info) {
+        const GstTagList* tags = gst_discoverer_info_get_tags(info);
+        if (tags) {
+            char* title = NULL;
+            char* artist = NULL;
+            char* album = NULL;
+
+            if (gst_tag_list_get_string(tags, GST_TAG_TITLE, &title)) {
+                if (title && title[0] != '\0') {
+                    g_free(song->title);
+                    song->title = title;
+                } else {
+                    g_free(title);
+                }
+            }
+            if (gst_tag_list_get_string(tags, GST_TAG_ARTIST, &artist)) {
+                if (artist && artist[0] != '\0') {
+                    g_free(song->artist);
+                    song->artist = artist;
+                } else {
+                    g_free(artist);
+                }
+            }
+            if (gst_tag_list_get_string(tags, GST_TAG_ALBUM, &album)) {
+                if (album && album[0] != '\0') {
+                    g_free(song->album);
+                    song->album = album;
+                } else {
+                    g_free(album);
+                }
+            }
+        }
+        gst_discoverer_info_unref(info);
+    } else {
+        if (err) {
+            g_clear_error(&err);
+        }
+    }
+
+    g_free(uri);
 }
 
 void playback_shuffle_toggle(MmpApp* app) {

@@ -89,16 +89,21 @@ void ui_update_queue(MmpApp* app) {
         }
 
         char* basename = NULL;
+        char* title_fallback = NULL;
         const char* display_name = NULL;
         if (found_song && found_song->title) {
             display_name = found_song->title;
         } else {
             basename = g_path_get_basename(path);
-            display_name = basename;
+            title_fallback = g_strdup(basename);
+            char* dot = g_strrstr(title_fallback, ".");
+            if (dot) *dot = '\0';
+            display_name = title_fallback;
         }
 
         GtkWidget* label = gtk_label_new(display_name);
         g_free(basename);
+        g_free(title_fallback);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
         gtk_widget_set_hexpand(label, TRUE);
         
@@ -226,6 +231,8 @@ static void scan_directory(MmpApp* app, const char* path) {
                 
                 if (!song->album) song->album = g_strdup("Unknown Album");
                 if (!song->artist) song->artist = g_strdup("Unknown Artist");
+
+                playback_get_metadata(app, song);
 
                 app->library = g_list_append(app->library, song);
                 add_song_to_ui(app, song);

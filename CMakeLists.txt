@@ -10,7 +10,7 @@ cmake_policy(SET CMP0076 NEW)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED gtk4)
-pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
+pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-pbutils-1.0)
 
 find_program(GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
 
