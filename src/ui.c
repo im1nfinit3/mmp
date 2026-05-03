@@ -203,7 +203,7 @@ static gboolean add_song_idle_cb(gpointer user_data) {
     return FALSE;
 }
 
-static void scan_directory_recursive(MmpApp* app, const char* path) {
+static void scan_directory_recursive(MmpApp* app, const char* path, GHashTable* existing_paths) {
     GFile* dir = g_file_new_for_path(path);
     GFileEnumerator* enumerator = g_file_enumerate_children(dir, "standard::*", G_FILE_QUERY_INFO_NONE, NULL, NULL);
 
@@ -215,45 +215,49 @@ static void scan_directory_recursive(MmpApp* app, const char* path) {
             char* child_path = g_file_get_path(child);
 
             if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
-                scan_directory_recursive(app, child_path);
+                scan_directory_recursive(app, child_path, existing_paths);
             } else if (g_str_has_suffix(name, ".mp3") || g_str_has_suffix(name, ".flac") || 
                        g_str_has_suffix(name, ".ogg") || g_str_has_suffix(name, ".wav") ||
                        g_str_has_suffix(name, ".m4a")) {
-                Song* song = g_new0(Song, 1);
-                song->path = g_strdup(child_path);
                 
-                char* title = g_strdup(name);
-                char* dot = g_strrstr(title, ".");
-                if (dot) *dot = '\0';
-                song->title = title;
-                
-                GFile* parent = g_file_get_parent(child);
-                GFile* grand_parent = parent ? g_file_get_parent(parent) : NULL;
-                
-                if (parent) {
-                    char* parent_name = g_file_get_basename(parent);
-                    song->album = g_strdup(parent_name);
-                    g_free(parent_name);
+                if (!g_hash_table_contains(existing_paths, child_path)) {
+                    Song* song = g_new0(Song, 1);
+                    song->path = g_strdup(child_path);
                     
-                    if (grand_parent) {
-                        char* grand_parent_name = g_file_get_basename(grand_parent);
-                        song->artist = g_strdup(grand_parent_name);
-                        g_free(grand_parent_name);
+                    char* title = g_strdup(name);
+                    char* dot = g_strrstr(title, ".");
+                    if (dot) *dot = '\0';
+                    song->title = title;
+                    
+                    GFile* parent = g_file_get_parent(child);
+                    GFile* grand_parent = parent ? g_file_get_parent(parent) : NULL;
+                    
+                    if (parent) {
+                        char* parent_name = g_file_get_basename(parent);
+                        song->album = g_strdup(parent_name);
+                        g_free(parent_name);
+                        
+                        if (grand_parent) {
+                            char* grand_parent_name = g_file_get_basename(grand_parent);
+                            song->artist = g_strdup(grand_parent_name);
+                            g_free(grand_parent_name);
+                        }
                     }
+                    
+                    if (!song->album) song->album = g_strdup("Unknown Album");
+                    if (!song->artist) song->artist = g_strdup("Unknown Artist");
+
+                    playback_get_metadata(app, song);
+                    db_save_song(app->library_db, song);
+
+                    SongUpdateData* update_data = g_new0(SongUpdateData, 1);
+                    update_data->app = app;
+                    update_data->song = song;
+                    g_idle_add(add_song_idle_cb, update_data);
+                    
+                    if (grand_parent) g_object_unref(grand_parent);
+                    if (parent) g_object_unref(parent);
                 }
-                
-                if (!song->album) song->album = g_strdup("Unknown Album");
-                if (!song->artist) song->artist = g_strdup("Unknown Artist");
-
-                playback_get_metadata(app, song);
-
-                SongUpdateData* update_data = g_new0(SongUpdateData, 1);
-                update_data->app = app;
-                update_data->song = song;
-                g_idle_add(add_song_idle_cb, update_data);
-                
-                if (grand_parent) g_object_unref(grand_parent);
-                if (parent) g_object_unref(parent);
             }
 
             g_free(child_path);
@@ -268,10 +272,18 @@ static void scan_directory_recursive(MmpApp* app, const char* path) {
 static void scan_directory_thread(GTask* task, gpointer source_object, gpointer task_data, GCancellable* cancellable) {
     (void)task; (void)source_object; (void)cancellable;
     MmpApp* app = (MmpApp*)task_data;
+
+    GHashTable* existing_paths = g_hash_table_new(g_str_hash, g_str_equal);
+    for (GList* l = app->library; l != NULL; l = l->next) {
+        Song* s = l->data;
+        g_hash_table_add(existing_paths, s->path);
+    }
+
     const char* music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);
     if (music_dir) {
-        scan_directory_recursive(app, music_dir);
+        scan_directory_recursive(app, music_dir, existing_paths);
     }
+    g_hash_table_destroy(existing_paths);
 }
 
 static void scan_directory_async(MmpApp* app) {
@@ -365,6 +377,11 @@ void app_activate_cb(GtkApplication* app) {
     char* db_path = g_build_filename(config_dir, "playlists.db", NULL);
     db_init(db_path, &mmp_app->db);
     g_free(db_path);
+
+    char* library_db_path = g_build_filename(config_dir, "library.db", NULL);
+    db_init(library_db_path, &mmp_app->library_db);
+    g_free(library_db_path);
+
     g_free(config_dir);
 
     GtkBuilder* builder = gtk_builder_new_from_resource("/xyz/_1nfinit3/mmp/ui/window.ui");
@@ -384,6 +401,15 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app->queue_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "queue_list"));
     mmp_app->playlist_songs_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "playlist_songs_list"));
     mmp_app->songs_search_entry = GTK_SEARCH_ENTRY(gtk_builder_get_object(builder, "songs_search_entry"));
+
+    // Load cached library
+    GList* cached_songs = db_get_all_songs(mmp_app->library_db);
+    for (GList* l = cached_songs; l != NULL; l = l->next) {
+        Song* s = l->data;
+        mmp_app->library = g_list_append(mmp_app->library, s);
+        add_song_to_ui(mmp_app, s);
+    }
+    g_list_free(cached_songs);
 
     gtk_list_box_set_filter_func(mmp_app->songs_list, filter_songs_cb, mmp_app, NULL);
     gtk_list_box_set_filter_func(mmp_app->albums_list, filter_albums_cb, mmp_app, NULL);

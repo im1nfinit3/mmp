@@ -1,5 +1,6 @@
 #include "playback.h"
 #include "ui.h"
+#include "database.h"
 #include <gst/gst.h>
 #include <gst/pbutils/pbutils.h>
 
@@ -87,6 +88,7 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
                                 g_free(s->artist);
                                 s->artist = g_strdup(artist);
                             }
+                            db_save_song(app->library_db, s);
                             break;
                         }
                     }

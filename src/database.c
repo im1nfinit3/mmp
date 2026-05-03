@@ -208,6 +208,39 @@ GList* db_get_playlist_songs(sqlite3* db, int playlist_id) {
     return list;
 }
 
+bool db_save_song(sqlite3* db, const Song* song) {
+    const char* sql = "INSERT OR REPLACE INTO songs (path, title, artist, album) VALUES (?, ?, ?, ?);";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, song->path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, song->title, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, song->artist, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, song->album, -1, SQLITE_STATIC);
+
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+GList* db_get_all_songs(sqlite3* db) {
+    const char* sql = "SELECT path, title, artist, album FROM songs;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+
+    GList* list = NULL;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Song* s = g_new0(Song, 1);
+        s->path = g_strdup((const char*)sqlite3_column_text(stmt, 0));
+        s->title = g_strdup((const char*)sqlite3_column_text(stmt, 1));
+        s->artist = g_strdup((const char*)sqlite3_column_text(stmt, 2));
+        s->album = g_strdup((const char*)sqlite3_column_text(stmt, 3));
+        list = g_list_append(list, s);
+    }
+    sqlite3_finalize(stmt);
+    return list;
+}
+
 void free_playlist(Playlist* p) {
     if (p) {
         g_free(p->name);

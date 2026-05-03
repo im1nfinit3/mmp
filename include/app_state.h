@@ -51,6 +51,7 @@ typedef struct {
     RepeatMode repeat_mode;
     GList* unplayed_pool;
     sqlite3* db;
+    sqlite3* library_db;
     int current_playlist_id;
 } MmpApp;
 
