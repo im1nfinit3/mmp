@@ -13,6 +13,14 @@ static bool execute_sql(sqlite3* db, const char* sql) {
     return true;
 }
 
+static void bind_text_or_null(sqlite3_stmt* stmt, int index, const char* text) {
+    if (text) {
+        sqlite3_bind_text(stmt, index, text, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, index);
+    }
+}
+
 bool db_init(const char* db_path, sqlite3** db_out) {
     int rc = sqlite3_open(db_path, db_out);
     if (rc != SQLITE_OK) {
@@ -31,7 +39,8 @@ bool db_init(const char* db_path, sqlite3** db_out) {
         "    path TEXT UNIQUE NOT NULL,"
         "    title TEXT,"
         "    artist TEXT,"
-        "    album TEXT"
+        "    album TEXT,"
+        "    duration_str TEXT"
         ");"
         "CREATE TABLE IF NOT EXISTS playlist_songs ("
         "    playlist_id INTEGER,"
@@ -42,7 +51,12 @@ bool db_init(const char* db_path, sqlite3** db_out) {
         "    FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE"
         ");";
 
-    return execute_sql(*db_out, schema);
+    if (!execute_sql(*db_out, schema)) return false;
+
+    // Migration: add duration_str column if it doesn't exist
+    sqlite3_exec(*db_out, "ALTER TABLE songs ADD COLUMN duration_str TEXT;", NULL, NULL, NULL);
+
+    return true;
 }
 
 void db_close(sqlite3* db) {
@@ -99,7 +113,10 @@ bool db_rename_playlist(sqlite3* db, int playlist_id, const char* new_name) {
 static int get_or_insert_song(sqlite3* db, const Song* song) {
     const char* select_sql = "SELECT id FROM songs WHERE path = ?;";
     sqlite3_stmt* select_stmt;
-    if (sqlite3_prepare_v2(db, select_sql, -1, &select_stmt, NULL) != SQLITE_OK) return -1;
+    if (sqlite3_prepare_v2(db, select_sql, -1, &select_stmt, NULL) != SQLITE_OK) {
+        g_printerr("SQL error in select: %s\n", sqlite3_errmsg(db));
+        return -1;
+    }
     sqlite3_bind_text(select_stmt, 1, song->path, -1, SQLITE_STATIC);
 
     int song_id = -1;
@@ -110,13 +127,17 @@ static int get_or_insert_song(sqlite3* db, const Song* song) {
 
     if (song_id != -1) return song_id;
 
-    const char* insert_sql = "INSERT INTO songs (path, title, artist, album) VALUES (?, ?, ?, ?);";
+    const char* insert_sql = "INSERT INTO songs (path, title, artist, album, duration_str) VALUES (?, ?, ?, ?, ?);";
     sqlite3_stmt* insert_stmt;
-    if (sqlite3_prepare_v2(db, insert_sql, -1, &insert_stmt, NULL) != SQLITE_OK) return -1;
+    if (sqlite3_prepare_v2(db, insert_sql, -1, &insert_stmt, NULL) != SQLITE_OK) {
+        g_printerr("SQL error in insert: %s\n", sqlite3_errmsg(db));
+        return -1;
+    }
     sqlite3_bind_text(insert_stmt, 1, song->path, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 2, song->title, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 3, song->artist, -1, SQLITE_STATIC);
-    sqlite3_bind_text(insert_stmt, 4, song->album, -1, SQLITE_STATIC);
+    bind_text_or_null(insert_stmt, 2, song->title);
+    bind_text_or_null(insert_stmt, 3, song->artist);
+    bind_text_or_null(insert_stmt, 4, song->album);
+    bind_text_or_null(insert_stmt, 5, song->duration_str);
 
     if (sqlite3_step(insert_stmt) == SQLITE_DONE) {
         song_id = (int)sqlite3_last_insert_rowid(db);
@@ -184,7 +205,7 @@ GList* db_get_playlists(sqlite3* db) {
 
 GList* db_get_playlist_songs(sqlite3* db, int playlist_id) {
     const char* sql = 
-        "SELECT s.path, s.title, s.artist, s.album "
+        "SELECT s.path, s.title, s.artist, s.album, s.duration_str "
         "FROM songs s "
         "JOIN playlist_songs ps ON s.id = ps.song_id "
         "WHERE ps.playlist_id = ? "
@@ -202,6 +223,44 @@ GList* db_get_playlist_songs(sqlite3* db, int playlist_id) {
         s->title = g_strdup((const char*)sqlite3_column_text(stmt, 1));
         s->artist = g_strdup((const char*)sqlite3_column_text(stmt, 2));
         s->album = g_strdup((const char*)sqlite3_column_text(stmt, 3));
+        const char* dur = (const char*)sqlite3_column_text(stmt, 4);
+        if (dur) s->duration_str = g_strdup(dur);
+        list = g_list_append(list, s);
+    }
+    sqlite3_finalize(stmt);
+    return list;
+}
+
+bool db_save_song(sqlite3* db, const Song* song) {
+    const char* sql = "INSERT OR REPLACE INTO songs (path, title, artist, album, duration_str) VALUES (?, ?, ?, ?, ?);";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, song->path, -1, SQLITE_STATIC);
+    bind_text_or_null(stmt, 2, song->title);
+    bind_text_or_null(stmt, 3, song->artist);
+    bind_text_or_null(stmt, 4, song->album);
+    bind_text_or_null(stmt, 5, song->duration_str);
+
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+GList* db_get_all_songs(sqlite3* db) {
+    const char* sql = "SELECT path, title, artist, album, duration_str FROM songs;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+
+    GList* list = NULL;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Song* s = g_new0(Song, 1);
+        s->path = g_strdup((const char*)sqlite3_column_text(stmt, 0));
+        s->title = g_strdup((const char*)sqlite3_column_text(stmt, 1));
+        s->artist = g_strdup((const char*)sqlite3_column_text(stmt, 2));
+        s->album = g_strdup((const char*)sqlite3_column_text(stmt, 3));
+        const char* dur = (const char*)sqlite3_column_text(stmt, 4);
+        if (dur) s->duration_str = g_strdup(dur);
         list = g_list_append(list, s);
     }
     sqlite3_finalize(stmt);

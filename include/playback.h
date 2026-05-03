@@ -18,6 +18,7 @@ void playback_clear_playlist(MmpApp* app);
 void playback_shuffle_toggle(MmpApp* app);
 void playback_repeat_toggle(MmpApp* app);
 void playback_rebuild_unplayed_pool(MmpApp* app);
+void playback_get_metadata(MmpApp* app, Song* song);
 gboolean playback_update_ui(MmpApp* app);
 
 #endif // MMP_PLAYBACK_H

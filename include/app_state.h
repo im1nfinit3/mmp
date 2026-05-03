@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <gst/gst.h>
+#include <gst/pbutils/pbutils.h>
 #include "sqlite3.h"
 
 typedef struct {
@@ -10,7 +11,16 @@ typedef struct {
     char* title;
     char* artist;
     char* album;
+    char* duration_str;
 } Song;
+
+typedef bool (*SongFilterFunc)(Song* song, gpointer user_data);
+
+typedef struct {
+    SongFilterFunc filter;
+    gpointer user_data;
+    GDestroyNotify notify;
+} SongFilter;
 
 typedef enum {
     REPEAT_OFF,
@@ -28,13 +38,12 @@ typedef struct {
     GtkButton* shuffle_button;
     GtkButton* repeat_button;
     GtkListBox* songs_list;
-    GtkListBox* recently_added_list;
     GtkListBox* albums_list;
     GtkListBox* artists_list;
     GtkListBox* queue_list;
-    GtkListBox* playlist_songs_list;
     GtkSearchEntry* songs_search_entry;
     GstElement* playbin;
+    GstDiscoverer* discoverer;
     char* current_file_path;
     GQueue* playlist;
     GList* current_track_node;
@@ -49,7 +58,12 @@ typedef struct {
     RepeatMode repeat_mode;
     GList* unplayed_pool;
     sqlite3* db;
+    sqlite3* library_db;
     int current_playlist_id;
+    GList* current_view_filters; // List of SongFilter*
+    GList* current_view_base_list; // Weak reference or owned list
+    bool current_view_base_list_owned;
+    bool current_view_reverse;
 } MmpApp;
 
 #endif // MMP_APP_STATE_H

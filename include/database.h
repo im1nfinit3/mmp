@@ -21,6 +21,9 @@ bool db_remove_song_from_playlist(sqlite3* db, int playlist_id, const char* song
 GList* db_get_playlists(sqlite3* db); // List of Playlist*
 GList* db_get_playlist_songs(sqlite3* db, int playlist_id); // List of Song*
 
+bool db_save_song(sqlite3* db, const Song* song);
+GList* db_get_all_songs(sqlite3* db); // List of Song*
+
 void free_playlist(Playlist* p);
 void free_song_list(GList* songs);
 
