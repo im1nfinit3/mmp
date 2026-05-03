@@ -83,6 +83,15 @@ static void song_add_to_queue_action_cb(GSimpleAction* action, GVariant* paramet
     playback_add_to_playlist(mmp_app, song->path, false);
 }
 
+static void song_add_all_to_queue_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter; (void)user_data;
+    GList* songs = ui_get_filtered_songs(mmp_app);
+    if (songs) {
+        playback_add_songs_to_playlist(mmp_app, songs);
+        g_list_free(songs);
+    }
+}
+
 static void song_properties_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
     (void)action; (void)parameter;
     Song* song = user_data;
@@ -137,6 +146,7 @@ static void show_song_context_menu(Song* song, double x, double y, GtkWidget* pa
         { "play_now", song_play_now_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "play_next", song_play_next_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "add_queue", song_add_to_queue_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "add_all_queue", song_add_all_to_queue_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "properties", song_properties_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "add_to_playlist", song_add_to_playlist_action_cb, "i", NULL, NULL, {0, 0, 0} },
         { "remove_from_playlist", song_remove_from_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} }
@@ -148,6 +158,7 @@ static void show_song_context_menu(Song* song, double x, double y, GtkWidget* pa
     g_menu_append(menu, "Play Now", "song.play_now");
     g_menu_append(menu, "Play Next", "song.play_next");
     g_menu_append(menu, "Add to Queue", "song.add_queue");
+    g_menu_append(menu, "Add all to Queue", "song.add_all_queue");
     g_menu_append(menu, "Properties", "song.properties");
 
     if (in_playlist_view) {

@@ -258,6 +258,42 @@ void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool 
     }
 }
 
+GList* ui_get_filtered_songs(MmpApp* app) {
+    if (!app->current_view_base_list) return NULL;
+
+    GList* songs = app->current_view_base_list;
+    bool reverse = app->current_view_reverse;
+    
+    if (reverse) {
+        songs = g_list_copy(songs);
+        songs = g_list_reverse(songs);
+    }
+
+    GList* filtered = NULL;
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* song = l->data;
+        bool pass = true;
+
+        for (GList* f = app->current_view_filters; f != NULL; f = f->next) {
+            SongFilter* filter = f->data;
+            if (!filter->filter(song, filter->user_data)) {
+                pass = false;
+                break;
+            }
+        }
+
+        if (pass) {
+            filtered = g_list_prepend(filtered, song);
+        }
+    }
+
+    if (reverse) {
+        g_list_free(songs);
+    }
+    
+    return g_list_reverse(filtered);
+}
+
 void ui_refresh_view(MmpApp* app) {
     ui_refresh_view_list(app, app->songs_list, app->current_view_base_list, app->current_view_reverse);
 }
