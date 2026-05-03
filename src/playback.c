@@ -266,7 +266,7 @@ void playback_play_track(MmpApp* app, GList* node) {
     ui_update_queue(app);
 }
 
-GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now) {
+static GList* playback_add_to_playlist_internal(MmpApp* app, const char* path, bool play_now, bool update_ui) {
     if (path == NULL) return NULL;
     
     g_queue_push_tail(app->playlist, g_strdup(path));
@@ -278,9 +278,24 @@ GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now) {
     
     if (play_now || app->current_track_node == NULL) {
         playback_play_track(app, new_node);
+    } else if (update_ui) {
+        ui_update_queue(app);
+    }
+    return new_node;
+}
+
+GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now) {
+    return playback_add_to_playlist_internal(app, path, play_now, true);
+}
+
+void playback_add_songs_to_playlist(MmpApp* app, GList* songs) {
+    if (!songs) return;
+    
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* song = l->data;
+        playback_add_to_playlist_internal(app, song->path, false, false);
     }
     ui_update_queue(app);
-    return new_node;
 }
 
 void playback_open_file(MmpApp* app, const char* path) {
