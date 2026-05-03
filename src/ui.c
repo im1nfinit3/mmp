@@ -118,7 +118,7 @@ void ui_update_queue(MmpApp* app) {
         // Add queue-specific controllers
         GtkGesture* gesture = gtk_gesture_click_new();
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-        g_signal_connect(gesture, "pressed", G_CALLBACK(queue_row_secondary_click_cb), NULL);
+        g_signal_connect(gesture, "released", G_CALLBACK(queue_row_secondary_click_cb), NULL);
         gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 
         GtkDragSource* drag_source = gtk_drag_source_new();
@@ -312,7 +312,7 @@ void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend
 
     GtkGesture* gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
+    g_signal_connect(gesture, "released", G_CALLBACK(song_row_secondary_click_cb), NULL);
     gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 }
 
@@ -797,6 +797,11 @@ void app_activate_cb(GtkApplication* app) {
     gtk_stack_add_titled(mmp_app->content_stack, settings_page_box, "settings", "Settings");
 
     // Signal Connections & Setup
+    const GActionEntry app_actions[] = {
+        { "create-playlist", create_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), mmp_app);
+
     // Load cached library
     GList* cached_songs = db_get_all_songs(mmp_app->library_db);
     for (GList* l = cached_songs; l != NULL; l = l->next) {
