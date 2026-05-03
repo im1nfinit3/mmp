@@ -43,7 +43,12 @@ bool db_init(const char* db_path, sqlite3** db_out) {
         "    FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE"
         ");";
 
-    return execute_sql(*db_out, schema);
+    if (!execute_sql(*db_out, schema)) return false;
+
+    // Migration: add duration_str column if it doesn't exist
+    execute_sql(*db_out, "ALTER TABLE songs ADD COLUMN duration_str TEXT;");
+
+    return true;
 }
 
 void db_close(sqlite3* db) {
@@ -100,7 +105,10 @@ bool db_rename_playlist(sqlite3* db, int playlist_id, const char* new_name) {
 static int get_or_insert_song(sqlite3* db, const Song* song) {
     const char* select_sql = "SELECT id FROM songs WHERE path = ?;";
     sqlite3_stmt* select_stmt;
-    if (sqlite3_prepare_v2(db, select_sql, -1, &select_stmt, NULL) != SQLITE_OK) return -1;
+    if (sqlite3_prepare_v2(db, select_sql, -1, &select_stmt, NULL) != SQLITE_OK) {
+        g_printerr("SQL error in select: %s\n", sqlite3_errmsg(db));
+        return -1;
+    }
     sqlite3_bind_text(select_stmt, 1, song->path, -1, SQLITE_STATIC);
 
     int song_id = -1;
@@ -111,13 +119,17 @@ static int get_or_insert_song(sqlite3* db, const Song* song) {
 
     if (song_id != -1) return song_id;
 
-    const char* insert_sql = "INSERT INTO songs (path, title, artist, album) VALUES (?, ?, ?, ?);";
+    const char* insert_sql = "INSERT INTO songs (path, title, artist, album, duration_str) VALUES (?, ?, ?, ?, ?);";
     sqlite3_stmt* insert_stmt;
-    if (sqlite3_prepare_v2(db, insert_sql, -1, &insert_stmt, NULL) != SQLITE_OK) return -1;
+    if (sqlite3_prepare_v2(db, insert_sql, -1, &insert_stmt, NULL) != SQLITE_OK) {
+        g_printerr("SQL error in insert: %s\n", sqlite3_errmsg(db));
+        return -1;
+    }
     sqlite3_bind_text(insert_stmt, 1, song->path, -1, SQLITE_STATIC);
     sqlite3_bind_text(insert_stmt, 2, song->title, -1, SQLITE_STATIC);
     sqlite3_bind_text(insert_stmt, 3, song->artist, -1, SQLITE_STATIC);
     sqlite3_bind_text(insert_stmt, 4, song->album, -1, SQLITE_STATIC);
+    sqlite3_bind_text(insert_stmt, 5, song->duration_str, -1, SQLITE_STATIC);
 
     if (sqlite3_step(insert_stmt) == SQLITE_DONE) {
         song_id = (int)sqlite3_last_insert_rowid(db);
