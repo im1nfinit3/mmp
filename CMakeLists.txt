@@ -10,7 +10,7 @@ cmake_policy(SET CMP0076 NEW)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED gtk4)
-pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
+pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-pbutils-1.0)
 
 find_program(GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
 
@@ -27,7 +27,6 @@ add_custom_command(
         ${GRESOURCE_XML}
     DEPENDS
         ${GRESOURCE_XML}
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/window.ui
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/style.css
     VERBATIM
 )
@@ -35,6 +34,7 @@ add_custom_command(
 set(SOURCES
     src/main.c
     src/ui.c
+    src/ui_callbacks.c
     src/playback.c
     src/database.c
     src/sqlite/sqlite3-all.c
