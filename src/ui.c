@@ -110,11 +110,15 @@ void ui_update_queue(MmpApp* app) {
         
         g_object_set_data(G_OBJECT(row), "playlist-node", iter);
         
+        GtkWidget* box = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
+        GtkWidget* active_indicator = gtk_image_new();
+        gtk_widget_set_size_request(active_indicator, 16, 16);
+        
         if (iter == app->current_track_node) {
-            GtkWidget* box = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
-            GtkWidget* active_indicator = gtk_image_new_from_icon_name("audio-volume-medium-symbolic");
-            gtk_box_append(GTK_BOX(box), active_indicator);
+            gtk_image_set_from_icon_name(GTK_IMAGE(active_indicator), "audio-volume-medium-symbolic");
         }
+        
+        gtk_box_prepend(GTK_BOX(box), active_indicator);
 
         // Add queue-specific controllers
         GtkGesture* gesture = gtk_gesture_click_new();
