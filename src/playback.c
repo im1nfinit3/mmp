@@ -156,6 +156,15 @@ void playback_get_metadata(MmpApp* app, Song* song) {
     GstDiscovererInfo* info = gst_discoverer_discover_uri(app->discoverer, uri, &err);
 
     if (info) {
+        GstClockTime duration = gst_discoverer_info_get_duration(info);
+        if (GST_CLOCK_TIME_IS_VALID(duration)) {
+            int seconds = (int)(duration / GST_SECOND);
+            int minutes = seconds / 60;
+            seconds %= 60;
+            g_free(song->duration_str);
+            song->duration_str = g_strdup_printf("%d:%02d", minutes, seconds);
+        }
+
         const GstTagList* tags = gst_discoverer_info_get_tags(info);
         if (tags) {
             char* title = NULL;

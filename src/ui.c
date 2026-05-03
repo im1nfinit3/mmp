@@ -145,8 +145,7 @@ void ui_update_queue(MmpApp* app) {
     }
 }
 
-static void add_song_to_ui(MmpApp* app, Song* song) {
-    GtkWidget* row = gtk_list_box_row_new();
+GtkWidget* create_song_row_box(Song* song) {
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_margin_start(box, 12);
     gtk_widget_set_margin_end(box, 12);
@@ -156,8 +155,29 @@ static void add_song_to_ui(MmpApp* app, Song* song) {
     GtkWidget* title_label = gtk_label_new(song->title);
     gtk_label_set_xalign(GTK_LABEL(title_label), 0);
     gtk_widget_set_hexpand(title_label, TRUE);
-    
     gtk_box_append(GTK_BOX(box), title_label);
+
+    GtkWidget* artist_label = gtk_label_new(song->artist);
+    gtk_widget_add_css_class(artist_label, "dim-label");
+    gtk_box_append(GTK_BOX(box), artist_label);
+
+    GtkWidget* album_label = gtk_label_new(song->album);
+    gtk_widget_add_css_class(album_label, "dim-label");
+    gtk_box_append(GTK_BOX(box), album_label);
+
+    if (song->duration_str) {
+        GtkWidget* duration_label = gtk_label_new(song->duration_str);
+        gtk_widget_add_css_class(duration_label, "dim-label");
+        gtk_box_append(GTK_BOX(box), duration_label);
+    }
+
+    return box;
+}
+
+static void add_song_to_ui(MmpApp* app, Song* song) {
+    GtkWidget* row = gtk_list_box_row_new();
+    GtkWidget* box = create_song_row_box(song);
+    
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     
     g_object_set_data(G_OBJECT(row), "song-data", song);
@@ -170,14 +190,8 @@ static void add_song_to_ui(MmpApp* app, Song* song) {
 
     // Also add to recently added
     GtkWidget* recent_row = gtk_list_box_row_new();
-    GtkWidget* recent_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_start(recent_box, 12);
-    gtk_widget_set_margin_end(recent_box, 12);
-    gtk_widget_set_margin_top(recent_box, 8);
-    gtk_widget_set_margin_bottom(recent_box, 8);
-    GtkWidget* recent_label = gtk_label_new(song->title);
-    gtk_label_set_xalign(GTK_LABEL(recent_label), 0);
-    gtk_box_append(GTK_BOX(recent_box), recent_label);
+    GtkWidget* recent_box = create_song_row_box(song);
+    
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(recent_row), recent_box);
     g_object_set_data(G_OBJECT(recent_row), "song-data", song);
     gtk_list_box_prepend(app->recently_added_list, recent_row);

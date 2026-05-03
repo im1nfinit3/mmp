@@ -156,3 +156,8 @@ list.library-list row {
 list.library-list row:hover {
   background: #242424;
 }
+
+.dim-label {
+  color: #a0a0a0;
+  font-size: 0.9em;
+}

@@ -11,6 +11,7 @@ typedef struct {
     char* title;
     char* artist;
     char* album;
+    char* duration_str;
 } Song;
 
 typedef enum {

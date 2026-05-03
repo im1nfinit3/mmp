@@ -51,12 +51,8 @@ static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
     for (GList* l = songs; l != NULL; l = l->next) {
         Song* s = l->data;
         GtkWidget* row = gtk_list_box_row_new();
-        GtkWidget* label = gtk_label_new(s->title);
-        gtk_label_set_xalign(GTK_LABEL(label), 0);
-        gtk_widget_set_margin_start(label, 12);
-        gtk_widget_set_margin_top(label, 8);
-        gtk_widget_set_margin_bottom(label, 8);
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+        GtkWidget* box = create_song_row_box(s);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
         g_object_set_data_full(G_OBJECT(row), "song-data", s, (GDestroyNotify)free_song);
         gtk_list_box_append(app->playlist_songs_list, row);
 
