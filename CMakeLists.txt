@@ -27,7 +27,6 @@ add_custom_command(
         ${GRESOURCE_XML}
     DEPENDS
         ${GRESOURCE_XML}
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/window.ui
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/style.css
     VERBATIM
 )
