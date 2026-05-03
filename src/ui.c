@@ -190,7 +190,20 @@ static void add_song_to_ui(MmpApp* app, Song* song) {
     add_to_library_ui(app, song);
 }
 
-static void scan_directory(MmpApp* app, const char* path) {
+typedef struct {
+    MmpApp* app;
+    Song* song;
+} SongUpdateData;
+
+static gboolean add_song_idle_cb(gpointer user_data) {
+    SongUpdateData* data = user_data;
+    data->app->library = g_list_append(data->app->library, data->song);
+    add_song_to_ui(data->app, data->song);
+    g_free(data);
+    return FALSE;
+}
+
+static void scan_directory_recursive(MmpApp* app, const char* path) {
     GFile* dir = g_file_new_for_path(path);
     GFileEnumerator* enumerator = g_file_enumerate_children(dir, "standard::*", G_FILE_QUERY_INFO_NONE, NULL, NULL);
 
@@ -202,7 +215,7 @@ static void scan_directory(MmpApp* app, const char* path) {
             char* child_path = g_file_get_path(child);
 
             if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
-                scan_directory(app, child_path);
+                scan_directory_recursive(app, child_path);
             } else if (g_str_has_suffix(name, ".mp3") || g_str_has_suffix(name, ".flac") || 
                        g_str_has_suffix(name, ".ogg") || g_str_has_suffix(name, ".wav") ||
                        g_str_has_suffix(name, ".m4a")) {
@@ -234,8 +247,10 @@ static void scan_directory(MmpApp* app, const char* path) {
 
                 playback_get_metadata(app, song);
 
-                app->library = g_list_append(app->library, song);
-                add_song_to_ui(app, song);
+                SongUpdateData* update_data = g_new0(SongUpdateData, 1);
+                update_data->app = app;
+                update_data->song = song;
+                g_idle_add(add_song_idle_cb, update_data);
                 
                 if (grand_parent) g_object_unref(grand_parent);
                 if (parent) g_object_unref(parent);
@@ -248,6 +263,22 @@ static void scan_directory(MmpApp* app, const char* path) {
         g_object_unref(enumerator);
     }
     g_object_unref(dir);
+}
+
+static void scan_directory_thread(GTask* task, gpointer source_object, gpointer task_data, GCancellable* cancellable) {
+    (void)task; (void)source_object; (void)cancellable;
+    MmpApp* app = (MmpApp*)task_data;
+    const char* music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);
+    if (music_dir) {
+        scan_directory_recursive(app, music_dir);
+    }
+}
+
+static void scan_directory_async(MmpApp* app) {
+    GTask* task = g_task_new(NULL, NULL, NULL, NULL);
+    g_task_set_task_data(task, app, NULL);
+    g_task_run_in_thread(task, scan_directory_thread);
+    g_object_unref(task);
 }
 
 static void load_css(GtkWindow* window) {
@@ -426,15 +457,12 @@ void app_activate_cb(GtkApplication* app) {
     g_signal_connect(volume_scale, "value-changed", G_CALLBACK(volume_scale_changed_cb), mmp_app);
     g_signal_connect(mmp_app->track_progress_scale, "value-changed", G_CALLBACK(track_progress_scale_value_changed_cb), mmp_app);
 
-    const char* music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);
-    if (music_dir) {
-        scan_directory(mmp_app, music_dir);
-    }
-
     g_timeout_add(500, (GSourceFunc)playback_update_ui, mmp_app);
 
     gtk_window_set_application(mmp_app->window, app);
     gtk_window_present(mmp_app->window);
+
+    scan_directory_async(mmp_app);
 
     g_object_unref(builder);
 }
