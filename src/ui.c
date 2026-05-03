@@ -155,14 +155,19 @@ GtkWidget* create_song_row_box(Song* song) {
     GtkWidget* title_label = gtk_label_new(song->title);
     gtk_label_set_xalign(GTK_LABEL(title_label), 0);
     gtk_widget_set_hexpand(title_label, TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
     gtk_box_append(GTK_BOX(box), title_label);
 
     GtkWidget* artist_label = gtk_label_new(song->artist);
     gtk_widget_add_css_class(artist_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(artist_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(artist_label), 20);
     gtk_box_append(GTK_BOX(box), artist_label);
 
     GtkWidget* album_label = gtk_label_new(song->album);
     gtk_widget_add_css_class(album_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(album_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(album_label), 20);
     gtk_box_append(GTK_BOX(box), album_label);
 
     if (song->duration_str) {
