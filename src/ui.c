@@ -25,9 +25,7 @@ static void add_to_library_ui(MmpApp* app, Song* song) {
         GtkWidget* row = gtk_list_box_row_new();
         GtkWidget* label = gtk_label_new(song->artist);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
-        gtk_widget_set_margin_start(label, 12);
-        gtk_widget_set_margin_top(label, 8);
-        gtk_widget_set_margin_bottom(label, 8);
+        gtk_widget_add_css_class(label, "row-label");
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
         gtk_list_box_append(app->artists_list, row);
     }
@@ -49,9 +47,7 @@ static void add_to_library_ui(MmpApp* app, Song* song) {
         GtkWidget* row = gtk_list_box_row_new();
         GtkWidget* label = gtk_label_new(song->album);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
-        gtk_widget_set_margin_start(label, 12);
-        gtk_widget_set_margin_top(label, 8);
-        gtk_widget_set_margin_bottom(label, 8);
+        gtk_widget_add_css_class(label, "row-label");
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
         g_object_set_data_full(G_OBJECT(row), "album-artist", g_strdup(song->artist), g_free);
         gtk_list_box_append(app->albums_list, row);
@@ -112,7 +108,6 @@ void ui_update_queue(MmpApp* app) {
         
         GtkWidget* box = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
         GtkWidget* active_indicator = gtk_image_new();
-        gtk_widget_set_size_request(active_indicator, 16, 16);
         
         if (iter == app->current_track_node) {
             gtk_image_set_from_icon_name(GTK_IMAGE(active_indicator), "audio-volume-medium-symbolic");
@@ -154,10 +149,7 @@ void ui_update_queue(MmpApp* app) {
 
 GtkWidget* create_song_row_box(Song* song) {
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_start(box, 12);
-    gtk_widget_set_margin_end(box, 12);
-    gtk_widget_set_margin_top(box, 8);
-    gtk_widget_set_margin_bottom(box, 8);
+    gtk_widget_add_css_class(box, "song-row");
 
     GtkWidget* title_label = gtk_label_new(song->title);
     gtk_label_set_xalign(GTK_LABEL(title_label), 0);
@@ -180,7 +172,7 @@ GtkWidget* create_song_row_box(Song* song) {
     if (song->duration_str) {
         GtkWidget* duration_label = gtk_label_new(song->duration_str);
         gtk_widget_add_css_class(duration_label, "dim-label");
-        gtk_widget_set_size_request(duration_label, 40, -1);
+        gtk_widget_add_css_class(duration_label, "duration-label");
         gtk_box_append(GTK_BOX(box), duration_label);
     }
 
@@ -529,9 +521,7 @@ void ui_update_playlists(MmpApp* app) {
         
         GtkWidget* label = gtk_label_new(p->name);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
-        gtk_widget_set_margin_start(label, 24);
-        gtk_widget_set_margin_top(label, 12);
-        gtk_widget_set_margin_bottom(label, 12);
+        gtk_widget_add_css_class(label, "row-label");
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
         gtk_widget_add_css_class(row, "nav-sub-row");
 
@@ -553,10 +543,7 @@ static GtkListBoxRow* create_nav_row(const char* label_text, const char* page_na
     GtkListBoxRow* row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
     GtkWidget* label = gtk_label_new(label_text);
     gtk_label_set_xalign(GTK_LABEL(label), 0);
-    gtk_widget_set_margin_start(label, 12);
-    gtk_widget_set_margin_end(label, 12);
-    gtk_widget_set_margin_top(label, 12);
-    gtk_widget_set_margin_bottom(label, 12);
+    gtk_widget_add_css_class(label, "row-label");
     gtk_list_box_row_set_child(row, label);
     g_object_set_data(G_OBJECT(row), "stack-page", (gpointer)page_name);
     return row;
@@ -564,10 +551,6 @@ static GtkListBoxRow* create_nav_row(const char* label_text, const char* page_na
 
 static GtkWidget* create_library_panel(const char* search_placeholder, GtkListBox** out_list, GtkSearchEntry** out_search) {
     GtkWidget* page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_margin_start(page_box, 24);
-    gtk_widget_set_margin_end(page_box, 24);
-    gtk_widget_set_margin_top(page_box, 24);
-    gtk_widget_set_margin_bottom(page_box, 24);
     gtk_widget_add_css_class(page_box, "content-page");
 
     GtkWidget* panel_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -638,35 +621,30 @@ void app_activate_cb(GtkApplication* app) {
 
     GtkButton* prev_button = GTK_BUTTON(gtk_button_new_from_icon_name("media-skip-backward-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(prev_button), "Previous track");
-    gtk_widget_set_size_request(GTK_WIDGET(prev_button), 36, 36);
     gtk_widget_set_valign(GTK_WIDGET(prev_button), GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(GTK_WIDGET(prev_button), "playback-button");
     gtk_box_append(GTK_BOX(controls_box), GTK_WIDGET(prev_button));
 
     mmp_app->play_pause_button = GTK_BUTTON(gtk_button_new_from_icon_name("media-playback-start-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(mmp_app->play_pause_button), "Play");
-    gtk_widget_set_size_request(GTK_WIDGET(mmp_app->play_pause_button), 36, 36);
     gtk_widget_set_valign(GTK_WIDGET(mmp_app->play_pause_button), GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(GTK_WIDGET(mmp_app->play_pause_button), "playback-button");
     gtk_box_append(GTK_BOX(controls_box), GTK_WIDGET(mmp_app->play_pause_button));
 
     GtkButton* next_button = GTK_BUTTON(gtk_button_new_from_icon_name("media-skip-forward-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(next_button), "Next track");
-    gtk_widget_set_size_request(GTK_WIDGET(next_button), 36, 36);
     gtk_widget_set_valign(GTK_WIDGET(next_button), GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(GTK_WIDGET(next_button), "playback-button");
     gtk_box_append(GTK_BOX(controls_box), GTK_WIDGET(next_button));
 
     mmp_app->repeat_button = GTK_BUTTON(gtk_button_new_from_icon_name("media-playlist-repeat-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(mmp_app->repeat_button), "Repeat");
-    gtk_widget_set_size_request(GTK_WIDGET(mmp_app->repeat_button), 36, 36);
     gtk_widget_set_valign(GTK_WIDGET(mmp_app->repeat_button), GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(GTK_WIDGET(mmp_app->repeat_button), "playback-button");
     gtk_box_append(GTK_BOX(controls_box), GTK_WIDGET(mmp_app->repeat_button));
 
     mmp_app->shuffle_button = GTK_BUTTON(gtk_button_new_from_icon_name("media-playlist-shuffle-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(mmp_app->shuffle_button), "Shuffle");
-    gtk_widget_set_size_request(GTK_WIDGET(mmp_app->shuffle_button), 36, 36);
     gtk_widget_set_valign(GTK_WIDGET(mmp_app->shuffle_button), GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(GTK_WIDGET(mmp_app->shuffle_button), "playback-button");
     gtk_box_append(GTK_BOX(controls_box), GTK_WIDGET(mmp_app->shuffle_button));
@@ -713,7 +691,7 @@ void app_activate_cb(GtkApplication* app) {
 
     GtkAdjustment* volume_adj = gtk_adjustment_new(70, 0, 100, 1, 10, 0);
     GtkWidget* volume_scale = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, volume_adj);
-    gtk_widget_set_size_request(volume_scale, 120, -1);
+    gtk_widget_add_css_class(volume_scale, "volume-scale");
     gtk_scale_set_draw_value(GTK_SCALE(volume_scale), FALSE);
     gtk_revealer_set_child(volume_revealer, volume_scale);
 
@@ -733,7 +711,6 @@ void app_activate_cb(GtkApplication* app) {
 
     // Navigation Pane
     GtkWidget* nav_pane = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request(nav_pane, 220, -1);
     gtk_widget_add_css_class(nav_pane, "nav-pane");
     gtk_box_append(GTK_BOX(main_shell), nav_pane);
 
@@ -766,10 +743,7 @@ void app_activate_cb(GtkApplication* app) {
     gtk_widget_add_css_class(GTK_WIDGET(nav_playlists_row), "nav-header");
     GtkWidget* playlists_label = gtk_label_new("Playlists");
     gtk_label_set_xalign(GTK_LABEL(playlists_label), 0);
-    gtk_widget_set_margin_start(playlists_label, 12);
-    gtk_widget_set_margin_end(playlists_label, 12);
-    gtk_widget_set_margin_top(playlists_label, 12);
-    gtk_widget_set_margin_bottom(playlists_label, 12);
+    gtk_widget_add_css_class(playlists_label, "row-label");
     gtk_list_box_row_set_child(nav_playlists_row, playlists_label);
     gtk_list_box_append(mmp_app->navigation_list, GTK_WIDGET(nav_playlists_row));
     g_object_set_data(G_OBJECT(mmp_app->window), "nav-playlists-row", nav_playlists_row);
@@ -801,10 +775,6 @@ void app_activate_cb(GtkApplication* app) {
 
     // Page: Queue
     GtkWidget* queue_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(queue_page_box, 24);
-    gtk_widget_set_margin_end(queue_page_box, 24);
-    gtk_widget_set_margin_top(queue_page_box, 24);
-    gtk_widget_set_margin_bottom(queue_page_box, 24);
     gtk_widget_add_css_class(queue_page_box, "content-page");
 
     GtkWidget* queue_scrolled = gtk_scrolled_window_new();
@@ -820,10 +790,6 @@ void app_activate_cb(GtkApplication* app) {
 
     // Page: Settings
     GtkWidget* settings_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(settings_page_box, 24);
-    gtk_widget_set_margin_end(settings_page_box, 24);
-    gtk_widget_set_margin_top(settings_page_box, 24);
-    gtk_widget_set_margin_bottom(settings_page_box, 24);
     gtk_widget_add_css_class(settings_page_box, "content-page");
 
     GtkWidget* scan_checkbox = gtk_check_button_new_with_label("Scan music folder on startup");

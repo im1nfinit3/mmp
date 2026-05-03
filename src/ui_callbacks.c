@@ -216,14 +216,12 @@ static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* 
     
     GtkWidget* play_btn = gtk_button_new_with_label("Play Now");
     gtk_widget_add_css_class(play_btn, "flat");
-    gtk_widget_set_halign(play_btn, GTK_ALIGN_START);
     g_signal_connect(play_btn, "clicked", G_CALLBACK(queue_play_now_cb), node);
     g_signal_connect_swapped(play_btn, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
     gtk_box_append(GTK_BOX(box), play_btn);
     
     GtkWidget* remove_btn = gtk_button_new_with_label("Remove from Queue");
     gtk_widget_add_css_class(remove_btn, "flat");
-    gtk_widget_set_halign(remove_btn, GTK_ALIGN_START);
     g_signal_connect(remove_btn, "clicked", G_CALLBACK(queue_remove_cb), node);
     g_signal_connect_swapped(remove_btn, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
     gtk_box_append(GTK_BOX(box), remove_btn);
@@ -233,7 +231,6 @@ static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* 
 
     GtkWidget* clear_btn = gtk_button_new_with_label("Clear Queue");
     gtk_widget_add_css_class(clear_btn, "flat");
-    gtk_widget_set_halign(clear_btn, GTK_ALIGN_START);
     g_signal_connect(clear_btn, "clicked", G_CALLBACK(queue_clear_cb), NULL);
     g_signal_connect_swapped(clear_btn, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
     gtk_box_append(GTK_BOX(box), clear_btn);
@@ -487,10 +484,7 @@ static void show_entry_dialog(GtkWindow* parent, const char* title, const char* 
     gtk_window_set_default_size(GTK_WINDOW(dialog), 300, -1);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(box, 12);
-    gtk_widget_set_margin_end(box, 12);
-    gtk_widget_set_margin_top(box, 12);
-    gtk_widget_set_margin_bottom(box, 12);
+    gtk_widget_add_css_class(box, "content-page");
     gtk_window_set_child(GTK_WINDOW(dialog), box);
 
     GtkWidget* entry = gtk_entry_new();
