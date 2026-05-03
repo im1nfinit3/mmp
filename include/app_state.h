@@ -61,7 +61,8 @@ typedef struct {
     sqlite3* library_db;
     int current_playlist_id;
     GList* current_view_filters; // List of SongFilter*
-    GList* current_view_base_list; // Weak reference to library or other list
+    GList* current_view_base_list; // Weak reference or owned list
+    bool current_view_base_list_owned;
     bool current_view_reverse;
 } MmpApp;
 

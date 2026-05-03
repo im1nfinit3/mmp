@@ -662,6 +662,14 @@ void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, do
     g_object_unref(action_group);
 }
 
+static Song* find_song_in_library(MmpApp* app, const char* path) {
+    for (GList* l = app->library; l != NULL; l = l->next) {
+        Song* s = l->data;
+        if (g_strcmp0(s->path, path) == 0) return s;
+    }
+    return NULL;
+}
+
 void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data) {
     (void)list_box;
     LibraryNavRows* rows = user_data;
@@ -672,28 +680,36 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
 
     const char* page_name = g_object_get_data(G_OBJECT(row), "stack-page");
     if (page_name != NULL) {
-        mmp_app->current_view_base_list = mmp_app->library;
-        mmp_app->current_view_reverse = false;
+        GList* base_list = mmp_app->library;
+        bool owned = false;
+        bool reverse = false;
+
         ui_clear_filters(mmp_app);
 
         if (g_object_get_data(G_OBJECT(row), "is-playlist-row")) {
             Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
             if (p) {
                 mmp_app->current_playlist_id = p->id;
-                // For simplicity in this demo, we'll fetch songs every time.
-                // In a real app, we might cache them.
-                GList* songs = db_get_playlist_songs(mmp_app->db, p->id);
-                mmp_app->current_view_base_list = songs;
-                // This list should be freed eventually. 
-                // A better architecture would manage this in ui_refresh_view.
+                GList* playlist_songs = db_get_playlist_songs(mmp_app->db, p->id);
+                GList* projected = NULL;
+                for (GList* l = playlist_songs; l != NULL; l = l->next) {
+                    Song* ps = l->data;
+                    Song* ls = find_song_in_library(mmp_app, ps->path);
+                    if (ls) projected = g_list_append(projected, ls);
+                }
+                g_list_free_full(playlist_songs, (GDestroyNotify)free_song);
+                base_list = projected;
+                owned = true;
             }
         } else if (g_strcmp0(page_name, "songs-view") == 0) {
             const char* view_mode = g_object_get_data(G_OBJECT(row), "view-mode");
             mmp_app->current_playlist_id = 0;
             if (g_strcmp0(view_mode, "recently-added") == 0) {
-                mmp_app->current_view_reverse = true;
+                reverse = true;
             }
         }
+
+        ui_set_view(mmp_app, base_list, owned, reverse);
 
         const char* search_text = gtk_editable_get_text(GTK_EDITABLE(mmp_app->songs_search_entry));
         if (search_text && strlen(search_text) > 0) {

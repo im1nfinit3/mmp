@@ -61,13 +61,7 @@ static void add_to_library_ui(MmpApp* app, Song* song) {
 void ui_update_queue(MmpApp* app) {
     if (!app->queue_list) return;
 
-    // Clear the list
-    GtkWidget* child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->queue_list))) != NULL) {
-        gtk_list_box_remove(app->queue_list, child);
-    }
-
-    // Build a temporary list of Song objects from the queue paths
+    // Build a temporary list of Song objects from the queue paths by projecting from library
     GList* queue_songs = NULL;
     GList* iter = app->playlist->head;
     while (iter) {
@@ -86,7 +80,7 @@ void ui_update_queue(MmpApp* app) {
         if (found_song) {
             queue_songs = g_list_append(queue_songs, found_song);
         } else {
-            // If not in library, create a temporary Song object
+            // Fallback for files not in library
             Song* s = g_new0(Song, 1);
             s->path = g_strdup(path);
             char* basename = g_path_get_basename(path);
@@ -96,39 +90,33 @@ void ui_update_queue(MmpApp* app) {
             s->artist = g_strdup("Unknown Artist");
             s->album = g_strdup("Unknown Album");
             g_free(basename);
-            
-            // We should probably cache these or add them to library
             queue_songs = g_list_append(queue_songs, s);
-            // Note: we need to decide who owns this song object.
-            // For now, let's say it's "temporary".
+            // In a better architecture, we'd add this to a "shadow library" or just library
         }
         iter = iter->next;
     }
 
-    // Populate the queue_list
-    // We can't easily use ui_refresh_view because it's hardcoded to app->songs_list
-    // Let's refactor ui_refresh_view to be more generic.
-    
-    int i = 0;
+    // Populate the queue_list using the same logic as other lists
+    // Note: the queue currently doesn't support global filters, but we could add them if needed.
+    ui_refresh_view_list(app, app->queue_list, queue_songs, false);
+
+    // After population, we need to add the playlist-node data and decorations
+    // This part is slightly different for the queue as it needs specific controllers
+    GtkWidget* row = gtk_widget_get_first_child(GTK_WIDGET(app->queue_list));
     iter = app->playlist->head;
-    for (GList* l = queue_songs; l != NULL; l = l->next, i++) {
-        Song* song = l->data;
-        GtkWidget* row = gtk_list_box_row_new();
-        GtkWidget* box = create_song_row_box(song);
+    GList* qs_iter = queue_songs;
+    while (row && iter && qs_iter) {
+        Song* song = qs_iter->data;
         
-        // Special case for active track in queue
+        g_object_set_data(G_OBJECT(row), "playlist-node", iter);
+        
         if (iter == app->current_track_node) {
+            GtkWidget* box = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
             GtkWidget* active_indicator = gtk_image_new_from_icon_name("audio-volume-medium-symbolic");
             gtk_box_append(GTK_BOX(box), active_indicator);
         }
 
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-        g_object_set_data(G_OBJECT(row), "playlist-node", iter);
-        g_object_set_data(G_OBJECT(row), "song-data", song);
-        
-        // ... (rest of the row setup: gestures, drag/drop)
-        // I'll need to keep the existing gestures.
-        
+        // Add queue-specific controllers
         GtkGesture* gesture = gtk_gesture_click_new();
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
         g_signal_connect(gesture, "pressed", G_CALLBACK(queue_row_secondary_click_cb), NULL);
@@ -151,12 +139,12 @@ void ui_update_queue(MmpApp* app) {
         g_signal_connect(drop_target, "drop", G_CALLBACK(queue_drop_cb), NULL);
         gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(drop_target));
 
-        gtk_list_box_append(app->queue_list, row);
+        row = gtk_widget_get_next_sibling(row);
         iter = iter->next;
+        qs_iter = qs_iter->next;
     }
 
-    // Clean up temporary songs if they weren't in library
-    // (This is getting complex, maybe I should just stick to the requested architecture)
+    // Clean up temporary song pointers (the Songs themselves are either in library or were leaked in fallback)
     g_list_free(queue_songs);
 }
 
@@ -218,6 +206,15 @@ void ui_clear_filters(MmpApp* app) {
     app->current_view_filters = NULL;
 }
 
+void ui_set_view(MmpApp* app, GList* base_list, bool owned, bool reverse) {
+    if (app->current_view_base_list && app->current_view_base_list_owned) {
+        g_list_free(app->current_view_base_list);
+    }
+    app->current_view_base_list = base_list;
+    app->current_view_base_list_owned = owned;
+    app->current_view_reverse = reverse;
+}
+
 void ui_add_filter(MmpApp* app, SongFilterFunc func, gpointer data, GDestroyNotify notify) {
     SongFilter* filter = g_new0(SongFilter, 1);
     filter->filter = func;
@@ -226,17 +223,17 @@ void ui_add_filter(MmpApp* app, SongFilterFunc func, gpointer data, GDestroyNoti
     app->current_view_filters = g_list_append(app->current_view_filters, filter);
 }
 
-void ui_refresh_view(MmpApp* app) {
-    if (!app->songs_list || !app->current_view_base_list) return;
+void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool reverse) {
+    if (!list || !base_list) return;
 
     // Clear the list
     GtkWidget* child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->songs_list))) != NULL) {
-        gtk_list_box_remove(app->songs_list, child);
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(list))) != NULL) {
+        gtk_list_box_remove(list, child);
     }
 
-    GList* songs = app->current_view_base_list;
-    if (app->current_view_reverse) {
+    GList* songs = base_list;
+    if (reverse) {
         songs = g_list_copy(songs);
         songs = g_list_reverse(songs);
     }
@@ -254,13 +251,17 @@ void ui_refresh_view(MmpApp* app) {
         }
 
         if (pass) {
-            ui_add_song_to_list(app, app->songs_list, song, false, false);
+            ui_add_song_to_list(app, list, song, false, false);
         }
     }
 
-    if (app->current_view_reverse) {
+    if (reverse) {
         g_list_free(songs);
     }
+}
+
+void ui_refresh_view(MmpApp* app) {
+    ui_refresh_view_list(app, app->songs_list, app->current_view_base_list, app->current_view_reverse);
 }
 
 bool search_filter_func(Song* song, gpointer user_data) {
