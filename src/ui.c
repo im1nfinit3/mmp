@@ -180,33 +180,77 @@ GtkWidget* create_song_row_box(Song* song) {
     return box;
 }
 
-static void add_song_to_ui(MmpApp* app, Song* song) {
+void free_song(Song* song) {
+    if (!song) return;
+    g_free(song->path);
+    g_free(song->title);
+    g_free(song->artist);
+    g_free(song->album);
+    g_free(song->duration_str);
+    g_free(song);
+}
+
+void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend, bool own_song) {
+    if (!list) return;
+
     GtkWidget* row = gtk_list_box_row_new();
     GtkWidget* box = create_song_row_box(song);
-    
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     
-    g_object_set_data(G_OBJECT(row), "song-data", song);
-    gtk_list_box_append(app->songs_list, row);
+    if (own_song) {
+        g_object_set_data_full(G_OBJECT(row), "song-data", song, (GDestroyNotify)free_song);
+    } else {
+        g_object_set_data(G_OBJECT(row), "song-data", song);
+    }
+
+    if (prepend) {
+        gtk_list_box_prepend(list, row);
+    } else {
+        gtk_list_box_append(list, row);
+    }
 
     GtkGesture* gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
     g_signal_connect(gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
     gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
+}
 
-    // Also add to recently added
-    GtkWidget* recent_row = gtk_list_box_row_new();
-    GtkWidget* recent_box = create_song_row_box(song);
+void ui_populate_songs(MmpApp* app, GList* songs, bool own_songs) {
+    if (!app->songs_list) return;
+
+    // Clear the list
+    GtkWidget* child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->songs_list))) != NULL) {
+        gtk_list_box_remove(app->songs_list, child);
+    }
+
+    // Populate
+    for (GList* l = songs; l != NULL; l = l->next) {
+        ui_add_song_to_list(app, app->songs_list, (Song*)l->data, false, own_songs);
+    }
+}
+
+static void add_song_to_ui(MmpApp* app, Song* song) {
+    // Only add to the songs_list if we are in "songs" or "recently-added" view
+    // For simplicity, we can just add to songs_list for now if it's visible or if it's the main library view
+    // But wait, the original code always added it to both.
+    // If we have a unified view, we might want to refresh it if it's currently showing the library.
     
-    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(recent_row), recent_box);
-    g_object_set_data(G_OBJECT(recent_row), "song-data", song);
-    gtk_list_box_prepend(app->recently_added_list, recent_row);
-
-    GtkGesture* recent_gesture = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(recent_gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(recent_gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
-    gtk_widget_add_controller(recent_row, GTK_EVENT_CONTROLLER(recent_gesture));
-
+    // For now, let's keep it simple: if songs_list is the current view, add to it.
+    // Actually, the original behavior was to populate them on startup.
+    
+    // If we are incrementally scanning, we should add to the list if it's the right view.
+    const char* current_page = gtk_stack_get_visible_child_name(app->content_stack);
+    if (g_strcmp0(current_page, "songs-view") == 0) {
+        // If we are in recently-added mode, we should prepend.
+        // How do we know the mode? Let's check the current playlist id.
+        if (app->current_playlist_id == 0) {
+            // We'll need a way to distinguish between "Songs" and "Recently Added"
+            // For now, let's just append.
+            ui_add_song_to_list(app, app->songs_list, song, false, false);
+        }
+    }
+    
     add_to_library_ui(app, song);
 }
 
@@ -225,11 +269,10 @@ static gboolean add_song_idle_cb(gpointer user_data) {
 
 static gboolean update_song_ui_idle_cb(gpointer user_data) {
     SongUpdateData* data = user_data;
-    GtkListBox* lists[] = {data->app->songs_list, data->app->recently_added_list, data->app->playlist_songs_list, NULL};
+    GtkListBox* list = data->app->songs_list;
     
-    for (int i = 0; i < 3; i++) {
-        if (!lists[i]) continue;
-        GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(lists[i]));
+    if (list) {
+        GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(list));
         while (child) {
             Song* s = g_object_get_data(G_OBJECT(child), "song-data");
             if (s && g_strcmp0(s->path, data->song->path) == 0) {
@@ -387,7 +430,7 @@ void ui_update_playlists(MmpApp* app) {
         Playlist* p = l->data;
         GtkWidget* row = gtk_list_box_row_new();
         g_object_set_data(G_OBJECT(row), "is-playlist-row", GINT_TO_POINTER(1));
-        g_object_set_data(G_OBJECT(row), "stack-page", (gpointer)"playlists");
+        g_object_set_data(G_OBJECT(row), "stack-page", (gpointer)"songs-view");
         g_object_set_data_full(G_OBJECT(row), "playlist", p, (GDestroyNotify)free_playlist);
         
         GtkWidget* label = gtk_label_new(p->name);
@@ -453,11 +496,9 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app->shuffle_button = GTK_BUTTON(gtk_builder_get_object(builder, "shuffle_button"));
     mmp_app->repeat_button = GTK_BUTTON(gtk_builder_get_object(builder, "repeat_button"));
     mmp_app->songs_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "songs_list"));
-    mmp_app->recently_added_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "recently_added_list"));
     mmp_app->albums_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "albums_list"));
     mmp_app->artists_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "artists_list"));
     mmp_app->queue_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "queue_list"));
-    mmp_app->playlist_songs_list = GTK_LIST_BOX(gtk_builder_get_object(builder, "playlist_songs_list"));
     mmp_app->songs_search_entry = GTK_SEARCH_ENTRY(gtk_builder_get_object(builder, "songs_search_entry"));
 
     // Load cached library
@@ -465,7 +506,7 @@ void app_activate_cb(GtkApplication* app) {
     for (GList* l = cached_songs; l != NULL; l = l->next) {
         Song* s = l->data;
         mmp_app->library = g_list_append(mmp_app->library, s);
-        add_song_to_ui(mmp_app, s);
+        add_to_library_ui(mmp_app, s);
     }
     g_list_free(cached_songs);
 
@@ -473,11 +514,9 @@ void app_activate_cb(GtkApplication* app) {
     gtk_list_box_set_filter_func(mmp_app->albums_list, filter_albums_cb, mmp_app, NULL);
     g_signal_connect(mmp_app->songs_search_entry, "search-changed", G_CALLBACK(search_changed_cb), mmp_app);
     g_signal_connect(mmp_app->songs_list, "row-activated", G_CALLBACK(song_row_activated_cb), mmp_app);
-    g_signal_connect(mmp_app->recently_added_list, "row-activated", G_CALLBACK(song_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->albums_list, "row-activated", G_CALLBACK(album_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->artists_list, "row-activated", G_CALLBACK(artist_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->queue_list, "row-activated", G_CALLBACK(queue_row_activated_cb), mmp_app);
-    g_signal_connect(mmp_app->playlist_songs_list, "row-activated", G_CALLBACK(song_row_activated_cb), mmp_app);
 
     GtkButton* prev_button = GTK_BUTTON(gtk_builder_get_object(builder, "previous_track_button"));
     GtkButton* next_button = GTK_BUTTON(gtk_builder_get_object(builder, "next_track_button"));
@@ -487,7 +526,7 @@ void app_activate_cb(GtkApplication* app) {
     mmp_app->navigation_list = navigation_list;
     mmp_app->content_stack = content_stack;
 
-    GtkListBoxRow* nav_playlists_row = navigation_row(builder, "nav_playlists_row", "playlists");
+    GtkListBoxRow* nav_playlists_row = navigation_row(builder, "nav_playlists_row", "songs-view");
     g_object_set_data(G_OBJECT(mmp_app->window), "nav-playlists-row", nav_playlists_row);
 
     GtkGesture* playlists_right_click = gtk_gesture_click_new();
@@ -509,7 +548,9 @@ void app_activate_cb(GtkApplication* app) {
     gtk_widget_add_controller(GTK_WIDGET(mmp_app->window), GTK_EVENT_CONTROLLER(drop_target));
 
     GtkEventController* volume_motion = gtk_event_controller_motion_new();
-    GtkListBoxRow* recently_added_row = navigation_row(builder, "nav_recently_added_row", "recently-added");
+    GtkListBoxRow* recently_added_row = navigation_row(builder, "nav_recently_added_row", "songs-view");
+    g_object_set_data(G_OBJECT(recently_added_row), "view-mode", (gpointer)"recently-added");
+    
     LibraryNavRows* library_nav_rows = g_new(LibraryNavRows, 1);
 
     library_nav_rows->stack = content_stack;
@@ -517,10 +558,11 @@ void app_activate_cb(GtkApplication* app) {
     library_nav_rows->recently_added_row = GTK_WIDGET(recently_added_row);
     library_nav_rows->albums_row = GTK_WIDGET(navigation_row(builder, "nav_albums_row", "albums"));
     library_nav_rows->artists_row = GTK_WIDGET(navigation_row(builder, "nav_artists_row", "artists"));
-    library_nav_rows->songs_row = GTK_WIDGET(navigation_row(builder, "nav_songs_row", "songs"));
+    GtkListBoxRow* songs_row = navigation_row(builder, "nav_songs_row", "songs-view");
+    library_nav_rows->songs_row = GTK_WIDGET(songs_row);
+    g_object_set_data(G_OBJECT(songs_row), "view-mode", (gpointer)"songs");
     
     navigation_row(builder, "nav_queue_row", "queue");
-    navigation_row(builder, "nav_playlists_row", "playlists");
     navigation_row(builder, "nav_settings_row", "settings");
 
     g_signal_connect_data(navigation_list, "row-selected", G_CALLBACK(navigation_row_selected_cb), library_nav_rows, (GClosureNotify)g_free, 0);

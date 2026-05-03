@@ -31,37 +31,26 @@ gboolean queue_drop_cb(GtkDropTarget* target, const GValue* value, double x, dou
     return FALSE;
 }
 
-static void free_song(Song* song) {
-    g_free(song->path);
-    g_free(song->title);
-    g_free(song->artist);
-    g_free(song->album);
-    g_free(song->duration_str);
-    g_free(song);
-}
-
 static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
     app->current_playlist_id = p->id;
-    // Clear playlist_songs_list
-    GtkWidget* child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->playlist_songs_list))) != NULL) {
-        gtk_list_box_remove(app->playlist_songs_list, child);
-    }
-
     GList* songs = db_get_playlist_songs(app->db, p->id);
+    
+    // Sync with library metadata to ensure consistent layout and data
     for (GList* l = songs; l != NULL; l = l->next) {
-        Song* s = l->data;
-        GtkWidget* row = gtk_list_box_row_new();
-        GtkWidget* box = create_song_row_box(s);
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-        g_object_set_data_full(G_OBJECT(row), "song-data", s, (GDestroyNotify)free_song);
-        gtk_list_box_append(app->playlist_songs_list, row);
-
-        GtkGesture* gesture = gtk_gesture_click_new();
-        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-        g_signal_connect(gesture, "pressed", G_CALLBACK(song_row_secondary_click_cb), NULL);
-        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
+        Song* ps = l->data;
+        for (GList* ll = app->library; ll != NULL; ll = ll->next) {
+            Song* ls = ll->data;
+            if (g_strcmp0(ps->path, ls->path) == 0) {
+                g_free(ps->title); ps->title = g_strdup(ls->title);
+                g_free(ps->artist); ps->artist = g_strdup(ls->artist);
+                g_free(ps->album); ps->album = g_strdup(ls->album);
+                g_free(ps->duration_str); ps->duration_str = g_strdup(ls->duration_str);
+                break;
+            }
+        }
     }
+
+    ui_populate_songs(app, songs, true);
     g_list_free(songs);
 }
 
@@ -146,9 +135,10 @@ static void song_remove_from_playlist_action_cb(GSimpleAction* action, GVariant*
 
 static void show_song_context_menu(Song* song, double x, double y, GtkWidget* parent_row) {
     GtkWidget* parent_list = gtk_widget_get_parent(parent_row);
-    bool in_playlist_view = (parent_list == GTK_WIDGET(mmp_app->playlist_songs_list));
+    bool in_playlist_view = (mmp_app->current_playlist_id > 0);
 
     GSimpleActionGroup* action_group = g_simple_action_group_new();
+
     const GActionEntry actions[] = {
         { "play_now", song_play_now_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "play_next", song_play_next_action_cb, NULL, NULL, NULL, {0, 0, 0} },
@@ -350,7 +340,7 @@ void album_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     if (app->songs_list) gtk_list_box_invalidate_filter(app->songs_list);
     
     if (app->content_stack) {
-        gtk_stack_set_visible_child_name(app->content_stack, "songs");
+        gtk_stack_set_visible_child_name(app->content_stack, "songs-view");
     }
 }
 
@@ -707,10 +697,9 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
         gtk_widget_set_visible(rows->songs_row, expanded);
 
         const char* current_page = gtk_stack_get_visible_child_name(rows->stack);
-        if (g_strcmp0(current_page, "recently-added") != 0 &&
+        if (g_strcmp0(current_page, "songs-view") != 0 &&
             g_strcmp0(current_page, "albums") != 0 &&
-            g_strcmp0(current_page, "artists") != 0 &&
-            g_strcmp0(current_page, "songs") != 0) {
+            g_strcmp0(current_page, "artists") != 0) {
             gtk_list_box_select_row(list_box, GTK_LIST_BOX_ROW(rows->recently_added_row));
         }
         return;
@@ -722,6 +711,17 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
             Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
             if (p) {
                 ui_show_playlist_contents(mmp_app, p);
+            }
+        } else if (g_strcmp0(page_name, "songs-view") == 0) {
+            const char* view_mode = g_object_get_data(G_OBJECT(row), "view-mode");
+            mmp_app->current_playlist_id = 0;
+            if (g_strcmp0(view_mode, "recently-added") == 0) {
+                GList* reversed = g_list_copy(mmp_app->library);
+                reversed = g_list_reverse(reversed);
+                ui_populate_songs(mmp_app, reversed, false);
+                g_list_free(reversed);
+            } else {
+                ui_populate_songs(mmp_app, mmp_app->library, false);
             }
         }
 

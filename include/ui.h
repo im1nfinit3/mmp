@@ -10,5 +10,8 @@ void ui_update_queue(MmpApp* app);
 void ui_update_playlists(MmpApp* app);
 void ui_refresh_library(MmpApp* app);
 GtkWidget* create_song_row_box(Song* song);
+void free_song(Song* song);
+void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend, bool own_song);
+void ui_populate_songs(MmpApp* app, GList* songs, bool own_songs);
 
 #endif // MMP_UI_H

@@ -344,8 +344,8 @@
                 </style>
                 <child>
                   <object class="GtkStackPage">
-                    <property name="name">recently-added</property>
-                    <property name="title">Recently added</property>
+                    <property name="name">songs-view</property>
+                    <property name="title">Songs</property>
                     <property name="child">
                       <object class="GtkBox">
                         <property name="orientation">vertical</property>
@@ -364,16 +364,16 @@
                               <class name="library-panel"/>
                             </style>
                             <child>
-                              <object class="GtkSearchEntry">
-                                <property name="placeholder-text">Search recently added music</property>
+                              <object class="GtkSearchEntry" id="songs_search_entry">
+                                <property name="placeholder-text">Search songs</property>
                               </object>
                             </child>
                             <child>
                               <object class="GtkScrolledWindow">
                                 <property name="vexpand">true</property>
                                 <property name="child">
-                                  <object class="GtkListBox" id="recently_added_list">
-                                    <property name="selection-mode">none</property>
+                                  <object class="GtkListBox" id="songs_list">
+                                    <property name="selection-mode">single</property>
                                     <style>
                                       <class name="library-list"/>
                                       <class name="boxed-list"/>
@@ -482,51 +482,6 @@
                 </child>
                 <child>
                   <object class="GtkStackPage">
-                    <property name="name">songs</property>
-                    <property name="title">Songs</property>
-                    <property name="child">
-                      <object class="GtkBox">
-                        <property name="orientation">vertical</property>
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">24</property>
-                        <property name="margin-bottom">24</property>
-                        <style>
-                          <class name="content-page"/>
-                        </style>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="vexpand">true</property>
-                            <style>
-                              <class name="library-panel"/>
-                            </style>
-                            <child>
-                              <object class="GtkSearchEntry" id="songs_search_entry">
-                                <property name="placeholder-text">Search songs</property>
-                              </object>
-                            </child>                            <child>
-                              <object class="GtkScrolledWindow">
-                                <property name="vexpand">true</property>
-                                <property name="child">
-                                  <object class="GtkListBox" id="songs_list">
-                                    <property name="selection-mode">none</property>
-                                    <style>
-                                      <class name="library-list"/>
-                                      <class name="boxed-list"/>
-                                    </style>
-                                  </object>
-                                </property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkStackPage">
                     <property name="name">queue</property>
                     <property name="title">Queue</property>
                     <property name="child">
@@ -546,39 +501,6 @@
                             <property name="child">
                               <object class="GtkListBox" id="queue_list">
                                 <property name="selection-mode">none</property>
-                                <style>
-                                  <class name="library-list"/>
-                                  <class name="boxed-list"/>
-                                </style>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                      </object>
-                    </property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkStackPage">
-                    <property name="name">playlists</property>
-                    <property name="title">Playlists</property>
-                    <property name="child">
-                      <object class="GtkBox">
-                        <property name="orientation">vertical</property>
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">24</property>
-                        <property name="margin-bottom">24</property>
-                        <property name="spacing">12</property>
-                        <style>
-                          <class name="content-page"/>
-                        </style>
-                        <child>
-                          <object class="GtkScrolledWindow">
-                            <property name="vexpand">true</property>
-                            <property name="child">
-                              <object class="GtkListBox" id="playlist_songs_list">
-                                <property name="selection-mode">single</property>
                                 <style>
                                   <class name="library-list"/>
                                   <class name="boxed-list"/>
