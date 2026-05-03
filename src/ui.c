@@ -220,13 +220,15 @@ void ui_add_filter(MmpApp* app, SongFilterFunc func, gpointer data, GDestroyNoti
 }
 
 void ui_refresh_view_list(MmpApp* app, GtkListBox* list, GList* base_list, bool reverse) {
-    if (!list || !base_list) return;
+    if (!list) return;
 
     // Clear the list
     GtkWidget* child;
     while ((child = gtk_widget_get_first_child(GTK_WIDGET(list))) != NULL) {
         gtk_list_box_remove(list, child);
     }
+
+    if (!base_list) return;
 
     GList* songs = base_list;
     if (reverse) {
