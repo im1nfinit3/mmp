@@ -483,7 +483,7 @@ static void scan_directory_async(MmpApp* app) {
 static void load_css(GtkWindow* window) {
     GtkCssProvider* provider = gtk_css_provider_new();
 
-    gtk_css_provider_load_from_resource(provider, "/xyz/_1nfinit3/mmp/ui/style.css");
+    gtk_css_provider_load_from_resource(provider, "/mmp/ui/style.css");
     gtk_style_context_add_provider_for_display(
         gtk_widget_get_display(GTK_WIDGET(window)),
         GTK_STYLE_PROVIDER(provider),
