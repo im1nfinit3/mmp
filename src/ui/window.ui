@@ -207,10 +207,10 @@
                       <class name="navigation-list"/>
                     </style>
                     <child>
-                      <object class="GtkListBoxRow" id="nav_library_row">
+                      <object class="GtkListBoxRow" id="nav_recently_added_row">
                         <property name="child">
                           <object class="GtkLabel">
-                            <property name="label">Library</property>
+                            <property name="label">Recently added</property>
                             <property name="xalign">0</property>
                             <property name="margin-start">12</property>
                             <property name="margin-end">12</property>
@@ -221,32 +221,12 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkListBoxRow" id="nav_recently_added_row">
-                        <style>
-                          <class name="nav-sub-row"/>
-                        </style>
-                        <property name="child">
-                          <object class="GtkLabel">
-                            <property name="label">Recently added</property>
-                            <property name="xalign">0</property>
-                            <property name="margin-start">24</property>
-                            <property name="margin-end">12</property>
-                            <property name="margin-top">12</property>
-                            <property name="margin-bottom">12</property>
-                          </object>
-                        </property>
-                      </object>
-                    </child>
-                    <child>
                       <object class="GtkListBoxRow" id="nav_albums_row">
-                        <style>
-                          <class name="nav-sub-row"/>
-                        </style>
                         <property name="child">
                           <object class="GtkLabel">
                             <property name="label">Albums</property>
                             <property name="xalign">0</property>
-                            <property name="margin-start">24</property>
+                            <property name="margin-start">12</property>
                             <property name="margin-end">12</property>
                             <property name="margin-top">12</property>
                             <property name="margin-bottom">12</property>
@@ -256,14 +236,11 @@
                     </child>
                     <child>
                       <object class="GtkListBoxRow" id="nav_artists_row">
-                        <style>
-                          <class name="nav-sub-row"/>
-                        </style>
                         <property name="child">
                           <object class="GtkLabel">
                             <property name="label">Artists</property>
                             <property name="xalign">0</property>
-                            <property name="margin-start">24</property>
+                            <property name="margin-start">12</property>
                             <property name="margin-end">12</property>
                             <property name="margin-top">12</property>
                             <property name="margin-bottom">12</property>
@@ -273,14 +250,11 @@
                     </child>
                     <child>
                       <object class="GtkListBoxRow" id="nav_songs_row">
-                        <style>
-                          <class name="nav-sub-row"/>
-                        </style>
                         <property name="child">
                           <object class="GtkLabel">
                             <property name="label">Songs</property>
                             <property name="xalign">0</property>
-                            <property name="margin-start">24</property>
+                            <property name="margin-start">12</property>
                             <property name="margin-end">12</property>
                             <property name="margin-top">12</property>
                             <property name="margin-bottom">12</property>

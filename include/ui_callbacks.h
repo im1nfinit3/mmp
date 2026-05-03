@@ -6,7 +6,6 @@
 
 typedef struct {
     GtkStack* stack;
-    GtkWidget* library_header_row;
     GtkWidget* recently_added_row;
     GtkWidget* albums_row;
     GtkWidget* artists_row;
@@ -21,7 +20,6 @@ gboolean queue_drop_cb(GtkDropTarget* target, const GValue* value, double x, dou
 void song_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
 void queue_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
 gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data);
-gboolean filter_songs_cb(GtkListBoxRow* row, gpointer user_data);
 void search_changed_cb(GtkSearchEntry* entry, gpointer user_data);
 void artist_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_data);
 void album_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_data);

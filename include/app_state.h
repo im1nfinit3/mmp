@@ -14,6 +14,14 @@ typedef struct {
     char* duration_str;
 } Song;
 
+typedef bool (*SongFilterFunc)(Song* song, gpointer user_data);
+
+typedef struct {
+    SongFilterFunc filter;
+    gpointer user_data;
+    GDestroyNotify notify;
+} SongFilter;
+
 typedef enum {
     REPEAT_OFF,
     REPEAT_ALL,
@@ -52,6 +60,9 @@ typedef struct {
     sqlite3* db;
     sqlite3* library_db;
     int current_playlist_id;
+    GList* current_view_filters; // List of SongFilter*
+    GList* current_view_base_list; // Weak reference to library or other list
+    bool current_view_reverse;
 } MmpApp;
 
 #endif // MMP_APP_STATE_H

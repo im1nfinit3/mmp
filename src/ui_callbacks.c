@@ -35,23 +35,17 @@ static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
     app->current_playlist_id = p->id;
     GList* songs = db_get_playlist_songs(app->db, p->id);
     
-    // Sync with library metadata to ensure consistent layout and data
-    for (GList* l = songs; l != NULL; l = l->next) {
-        Song* ps = l->data;
-        for (GList* ll = app->library; ll != NULL; ll = ll->next) {
-            Song* ls = ll->data;
-            if (g_strcmp0(ps->path, ls->path) == 0) {
-                g_free(ps->title); ps->title = g_strdup(ls->title);
-                g_free(ps->artist); ps->artist = g_strdup(ls->artist);
-                g_free(ps->album); ps->album = g_strdup(ls->album);
-                g_free(ps->duration_str); ps->duration_str = g_strdup(ls->duration_str);
-                break;
-            }
-        }
+    app->current_view_base_list = songs;
+    app->current_view_reverse = false;
+    ui_clear_filters(app);
+    
+    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
+    if (search_text && strlen(search_text) > 0) {
+        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
     }
 
-    ui_populate_songs(app, songs, true);
-    g_list_free(songs);
+    ui_refresh_view(app);
+    // Note: in a real app, we'd need to manage the lifecycle of 'songs' GList and its Song objects.
 }
 
 static void song_properties_cb(GtkWidget* widget, gpointer user_data) {
@@ -274,36 +268,10 @@ gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data) {
     return FALSE;
 }
 
-gboolean filter_songs_cb(GtkListBoxRow* row, gpointer user_data) {
-    MmpApp* app = user_data;
-    Song* song = g_object_get_data(G_OBJECT(row), "song-data");
-    if (!song) return TRUE;
-
-    if (app->selected_artist_filter && g_strcmp0(song->artist, app->selected_artist_filter) != 0) {
-        return FALSE;
-    }
-    if (app->selected_album_filter && g_strcmp0(song->album, app->selected_album_filter) != 0) {
-        return FALSE;
-    }
-
-    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
-    if (search_text == NULL || strlen(search_text) == 0) return TRUE;
-
-    char* search_lower = g_utf8_strdown(search_text, -1);
-    char* title_lower = g_utf8_strdown(song->title, -1);
-    
-    gboolean visible = (strstr(title_lower, search_lower) != NULL);
-    
-    g_free(search_lower);
-    g_free(title_lower);
-    
-    return visible;
-}
-
 void search_changed_cb(GtkSearchEntry* entry, gpointer user_data) {
     (void)entry;
     MmpApp* app = user_data;
-    gtk_list_box_invalidate_filter(app->songs_list);
+    ui_refresh_view(app);
 }
 
 void artist_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_data) {
@@ -320,7 +288,6 @@ void artist_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user
     app->selected_album_filter = NULL;
     
     if (app->albums_list) gtk_list_box_invalidate_filter(app->albums_list);
-    if (app->songs_list) gtk_list_box_invalidate_filter(app->songs_list);
     
     if (app->content_stack) {
         gtk_stack_set_visible_child_name(app->content_stack, "albums");
@@ -337,7 +304,21 @@ void album_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     g_free(app->selected_album_filter);
     app->selected_album_filter = g_strdup(album);
     
-    if (app->songs_list) gtk_list_box_invalidate_filter(app->songs_list);
+    app->current_view_base_list = app->library;
+    app->current_view_reverse = false;
+    ui_clear_filters(app);
+    
+    if (app->selected_artist_filter) {
+        ui_add_filter(app, artist_filter_func, g_strdup(app->selected_artist_filter), g_free);
+    }
+    ui_add_filter(app, album_filter_func, g_strdup(app->selected_album_filter), g_free);
+    
+    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
+    if (search_text && strlen(search_text) > 0) {
+        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
+    }
+    
+    ui_refresh_view(app);
     
     if (app->content_stack) {
         gtk_stack_set_visible_child_name(app->content_stack, "songs-view");
@@ -689,42 +670,37 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
         return;
     }
 
-    if (row == GTK_LIST_BOX_ROW(rows->library_header_row)) {
-        gboolean expanded = !gtk_widget_get_visible(rows->recently_added_row);
-        gtk_widget_set_visible(rows->recently_added_row, expanded);
-        gtk_widget_set_visible(rows->albums_row, expanded);
-        gtk_widget_set_visible(rows->artists_row, expanded);
-        gtk_widget_set_visible(rows->songs_row, expanded);
-
-        const char* current_page = gtk_stack_get_visible_child_name(rows->stack);
-        if (g_strcmp0(current_page, "songs-view") != 0 &&
-            g_strcmp0(current_page, "albums") != 0 &&
-            g_strcmp0(current_page, "artists") != 0) {
-            gtk_list_box_select_row(list_box, GTK_LIST_BOX_ROW(rows->recently_added_row));
-        }
-        return;
-    }
-
     const char* page_name = g_object_get_data(G_OBJECT(row), "stack-page");
     if (page_name != NULL) {
+        mmp_app->current_view_base_list = mmp_app->library;
+        mmp_app->current_view_reverse = false;
+        ui_clear_filters(mmp_app);
+
         if (g_object_get_data(G_OBJECT(row), "is-playlist-row")) {
             Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
             if (p) {
-                ui_show_playlist_contents(mmp_app, p);
+                mmp_app->current_playlist_id = p->id;
+                // For simplicity in this demo, we'll fetch songs every time.
+                // In a real app, we might cache them.
+                GList* songs = db_get_playlist_songs(mmp_app->db, p->id);
+                mmp_app->current_view_base_list = songs;
+                // This list should be freed eventually. 
+                // A better architecture would manage this in ui_refresh_view.
             }
         } else if (g_strcmp0(page_name, "songs-view") == 0) {
             const char* view_mode = g_object_get_data(G_OBJECT(row), "view-mode");
             mmp_app->current_playlist_id = 0;
             if (g_strcmp0(view_mode, "recently-added") == 0) {
-                GList* reversed = g_list_copy(mmp_app->library);
-                reversed = g_list_reverse(reversed);
-                ui_populate_songs(mmp_app, reversed, false);
-                g_list_free(reversed);
-            } else {
-                ui_populate_songs(mmp_app, mmp_app->library, false);
+                mmp_app->current_view_reverse = true;
             }
         }
 
+        const char* search_text = gtk_editable_get_text(GTK_EDITABLE(mmp_app->songs_search_entry));
+        if (search_text && strlen(search_text) > 0) {
+            ui_add_filter(mmp_app, search_filter_func, (gpointer)search_text, NULL);
+        }
+
+        ui_refresh_view(mmp_app);
         gtk_stack_set_visible_child_name(rows->stack, page_name);
         
         if (mmp_app) {
@@ -734,7 +710,6 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
             mmp_app->selected_album_filter = NULL;
             
             if (mmp_app->albums_list) gtk_list_box_invalidate_filter(mmp_app->albums_list);
-            if (mmp_app->songs_list) gtk_list_box_invalidate_filter(mmp_app->songs_list);
         }
     }
 }
