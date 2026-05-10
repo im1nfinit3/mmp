@@ -220,11 +220,14 @@ static void queue_clear_action_cb(GSimpleAction* action, GVariant* parameter, gp
     playback_clear_playlist(mmp_app);
 }
 
+static void queue_save_as_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data);
+
 static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* parent_row) {
     GSimpleActionGroup* action_group = g_simple_action_group_new();
     const GActionEntry actions[] = {
         { "play_now", queue_play_now_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "remove", queue_remove_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "save_playlist", queue_save_as_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "clear", queue_clear_action_cb, NULL, NULL, NULL, {0, 0, 0} }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(action_group), actions, G_N_ELEMENTS(actions), node);
@@ -235,6 +238,11 @@ static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* 
     g_menu_append(menu, "Remove from Queue", "queue.remove");
     
     GMenu* section = g_menu_new();
+    g_menu_append(section, "Save Queue as Playlist", "queue.save_playlist");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+    
+    section = g_menu_new();
     g_menu_append(section, "Clear Queue", "queue.clear");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
     g_object_unref(section);
@@ -634,6 +642,28 @@ static void create_playlist_clicked_cb(GtkButton* button, gpointer user_data) {
 void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
     (void)action; (void)parameter;
     create_playlist_clicked_cb(NULL, user_data);
+}
+
+static void on_save_queue_as_playlist_done(const char* name, gpointer user_data) {
+    if (!name || strlen(name) == 0) return;
+    MmpApp* app = user_data;
+
+    int new_id;
+    if (!db_create_playlist(app->db, name, &new_id)) return;
+
+    for (GList* l = app->playlist->head; l != NULL; l = l->next) {
+        Song* song = g_hash_table_lookup(app->library_by_path, (const char*)l->data);
+        if (song) {
+            db_add_song_to_playlist(app->db, new_id, song);
+        }
+    }
+
+    ui_update_playlists(app);
+}
+
+static void queue_save_as_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter; (void)user_data;
+    show_entry_dialog(GTK_WINDOW(mmp_app->window), "Save Queue as Playlist", "New Playlist", on_save_queue_as_playlist_done, mmp_app);
 }
 
 void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
