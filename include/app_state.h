@@ -41,7 +41,8 @@ typedef struct {
     GListStore* song_store;
     GtkListBox* albums_list;
     GtkListBox* artists_list;
-    GtkListBox* queue_list;
+    GtkListView* queue_view;
+    GListStore* queue_store;
     GtkSearchEntry* songs_search_entry;
     GstElement* playbin;
     GstDiscoverer* discoverer;
@@ -61,6 +62,7 @@ typedef struct {
     sqlite3* db;
     sqlite3* library_db;
     int current_playlist_id;
+    GList* queue_fallback_songs;
     GList* current_view_filters; // List of SongFilter*
     GList* current_view_base_list; // Weak reference or owned list
     bool current_view_base_list_owned;

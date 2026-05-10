@@ -358,6 +358,15 @@ void queue_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     }
 }
 
+void queue_view_activate_cb(GtkListView* view, guint position, gpointer user_data) {
+    MmpApp* app = user_data;
+    GList* node = g_queue_peek_nth_link(app->playlist, position);
+    if (node) {
+        playback_play_track(app, node);
+        ui_update_queue(app);
+    }
+}
+
 void volume_controls_enter_cb(
     GtkEventControllerMotion* controller,
     double x,

@@ -264,6 +264,7 @@ void playback_play_track(MmpApp* app, GList* node) {
         g_free(uri);
     }
     ui_update_queue(app);
+    ui_refresh_view(app);
 }
 
 static GList* playback_add_to_playlist_internal(MmpApp* app, const char* path, bool play_now, bool update_ui) {

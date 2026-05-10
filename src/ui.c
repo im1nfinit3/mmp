@@ -66,15 +66,16 @@ static void add_to_library_ui(MmpApp* app, Song* song) {
 }
 
 void ui_update_queue(MmpApp* app) {
-    if (!app->queue_list) return;
+    if (!app->queue_store) return;
 
-    // Build a temporary list of Song objects from the queue paths by projecting from library
-    GList* queue_songs = NULL;
+    g_list_free_full(app->queue_fallback_songs, (GDestroyNotify)free_song);
+    app->queue_fallback_songs = NULL;
+    g_list_store_remove_all(app->queue_store);
+
     GList* iter = app->playlist->head;
     while (iter) {
         const char* path = iter->data;
-        
-        // Find song in library
+
         Song* found_song = NULL;
         for (GList* l = app->library; l != NULL; l = l->next) {
             Song* s = (Song*)l->data;
@@ -84,10 +85,10 @@ void ui_update_queue(MmpApp* app) {
             }
         }
 
+        MmpSongItem* item;
         if (found_song) {
-            queue_songs = g_list_append(queue_songs, found_song);
+            item = mmp_song_item_new(found_song);
         } else {
-            // Fallback for files not in library
             Song* s = g_new0(Song, 1);
             s->path = g_strdup(path);
             char* basename = g_path_get_basename(path);
@@ -97,65 +98,14 @@ void ui_update_queue(MmpApp* app) {
             s->artist = g_strdup("Unknown Artist");
             s->album = g_strdup("Unknown Album");
             g_free(basename);
-            queue_songs = g_list_append(queue_songs, s);
-            // In a better architecture, we'd add this to a "shadow library" or just library
+            item = mmp_song_item_new(s);
+            app->queue_fallback_songs = g_list_append(app->queue_fallback_songs, s);
         }
+
+        g_list_store_append(app->queue_store, G_OBJECT(item));
+        g_object_unref(item);
         iter = iter->next;
     }
-
-    // Populate the queue_list using the same logic as other lists
-    // Note: the queue currently doesn't support global filters, but we could add them if needed.
-    ui_refresh_view_list(app, app->queue_list, queue_songs, false);
-
-    // After population, we need to add the playlist-node data and decorations
-    // This part is slightly different for the queue as it needs specific controllers
-    GtkWidget* row = gtk_widget_get_first_child(GTK_WIDGET(app->queue_list));
-    iter = app->playlist->head;
-    GList* qs_iter = queue_songs;
-    while (row && iter && qs_iter) {
-        Song* song = qs_iter->data;
-        
-        g_object_set_data(G_OBJECT(row), "playlist-node", iter);
-        
-        GtkWidget* box = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
-        GtkWidget* active_indicator = gtk_image_new();
-        
-        if (iter == app->current_track_node) {
-            gtk_image_set_from_icon_name(GTK_IMAGE(active_indicator), "audio-volume-medium-symbolic");
-        }
-        
-        gtk_box_prepend(GTK_BOX(box), active_indicator);
-
-        // Add queue-specific controllers
-        GtkGesture* gesture = gtk_gesture_click_new();
-        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-        g_signal_connect(gesture, "released", G_CALLBACK(queue_row_secondary_click_cb), NULL);
-        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
-
-        GtkDragSource* drag_source = gtk_drag_source_new();
-        gtk_drag_source_set_actions(drag_source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
-        g_signal_connect(drag_source, "drag-begin", G_CALLBACK(queue_drag_begin_cb), NULL);
-        
-        GValue value = G_VALUE_INIT;
-        g_value_init(&value, G_TYPE_STRING);
-        g_value_set_static_string(&value, "reorder");
-        GdkContentProvider* content = gdk_content_provider_new_for_value(&value);
-        gtk_drag_source_set_content(drag_source, content);
-        g_object_unref(content);
-        g_value_unset(&value);
-        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(drag_source));
-
-        GtkDropTarget* drop_target = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_COPY | GDK_ACTION_MOVE);
-        g_signal_connect(drop_target, "drop", G_CALLBACK(queue_drop_cb), NULL);
-        gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(drop_target));
-
-        row = gtk_widget_get_next_sibling(row);
-        iter = iter->next;
-        qs_iter = qs_iter->next;
-    }
-
-    // Clean up temporary song pointers (the Songs themselves are either in library or were leaked in fallback)
-    g_list_free(queue_songs);
 }
 
 GtkWidget* create_song_row_box(Song* song) {
@@ -206,6 +156,9 @@ static void song_factory_setup(GtkSignalListItemFactory* factory, GtkListItem* i
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(box, "song-row");
 
+    GtkWidget* indicator = gtk_image_new();
+    gtk_box_append(GTK_BOX(box), indicator);
+
     GtkWidget* title_label = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(title_label), 0);
     gtk_widget_set_hexpand(title_label, TRUE);
@@ -249,7 +202,112 @@ static void song_factory_bind(GtkSignalListItemFactory* factory, GtkListItem* it
 
     g_object_set_data(G_OBJECT(box), "song-data", song);
 
-    GtkWidget* title_label = gtk_widget_get_first_child(box);
+    GtkWidget* indicator = gtk_widget_get_first_child(box);
+    if (g_strcmp0(song->path, mmp_app->current_file_path) == 0) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(indicator), "audio-volume-medium-symbolic");
+    } else {
+        gtk_image_clear(GTK_IMAGE(indicator));
+    }
+
+    GtkWidget* title_label = gtk_widget_get_next_sibling(indicator);
+    gtk_label_set_label(GTK_LABEL(title_label), song->title);
+
+    GtkWidget* artist_label = gtk_widget_get_next_sibling(title_label);
+    gtk_label_set_label(GTK_LABEL(artist_label), song->artist);
+
+    GtkWidget* album_label = gtk_widget_get_next_sibling(artist_label);
+    gtk_label_set_label(GTK_LABEL(album_label), song->album);
+
+    GtkWidget* duration_label = gtk_widget_get_next_sibling(album_label);
+    if (song->duration_str) {
+        gtk_label_set_label(GTK_LABEL(duration_label), song->duration_str);
+        gtk_widget_set_visible(duration_label, TRUE);
+    } else {
+        gtk_widget_set_visible(duration_label, FALSE);
+    }
+}
+
+static void queue_factory_setup(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    (void)factory; (void)user_data;
+
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(box, "song-row");
+
+    GtkWidget* indicator = gtk_image_new();
+    gtk_box_append(GTK_BOX(box), indicator);
+
+    GtkWidget* title_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(title_label), 0);
+    gtk_widget_set_hexpand(title_label, TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
+    gtk_box_append(GTK_BOX(box), title_label);
+
+    GtkWidget* artist_label = gtk_label_new("");
+    gtk_widget_add_css_class(artist_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(artist_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(artist_label), 15);
+    gtk_box_append(GTK_BOX(box), artist_label);
+
+    GtkWidget* album_label = gtk_label_new("");
+    gtk_widget_add_css_class(album_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(album_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(album_label), 15);
+    gtk_box_append(GTK_BOX(box), album_label);
+
+    GtkWidget* duration_label = gtk_label_new("");
+    gtk_widget_add_css_class(duration_label, "dim-label");
+    gtk_widget_add_css_class(duration_label, "duration-label");
+    gtk_box_append(GTK_BOX(box), duration_label);
+
+    gtk_list_item_set_child(item, box);
+
+    GtkGesture* gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+    g_signal_connect(gesture, "released", G_CALLBACK(queue_row_secondary_click_cb), NULL);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(gesture));
+
+    GtkDragSource* drag_source = gtk_drag_source_new();
+    gtk_drag_source_set_actions(drag_source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(drag_source, "drag-begin", G_CALLBACK(queue_drag_begin_cb), NULL);
+
+    GValue val = G_VALUE_INIT;
+    g_value_init(&val, G_TYPE_STRING);
+    g_value_set_static_string(&val, "reorder");
+    GdkContentProvider* content = gdk_content_provider_new_for_value(&val);
+    gtk_drag_source_set_content(drag_source, content);
+    g_object_unref(content);
+    g_value_unset(&val);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(drag_source));
+
+    GtkDropTarget* drop_target = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(drop_target, "drop", G_CALLBACK(queue_drop_cb), NULL);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(drop_target));
+}
+
+static void queue_factory_bind(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    (void)factory; (void)user_data;
+
+    MmpSongItem* song_item = MMP_SONG_ITEM(gtk_list_item_get_item(item));
+    if (!song_item || !song_item->song) return;
+
+    Song* song = song_item->song;
+    GtkWidget* box = gtk_list_item_get_child(item);
+    if (!box) return;
+
+    guint pos = gtk_list_item_get_position(item);
+    GList* node = g_queue_peek_nth_link(mmp_app->playlist, pos);
+
+    g_object_set_data(G_OBJECT(box), "song-data", song);
+    g_object_set_data(G_OBJECT(box), "playlist-node", node);
+
+    GtkWidget* indicator = gtk_widget_get_first_child(box);
+    if (node == mmp_app->current_track_node) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(indicator), "audio-volume-medium-symbolic");
+    } else {
+        gtk_image_clear(GTK_IMAGE(indicator));
+    }
+
+    GtkWidget* title_label = gtk_widget_get_next_sibling(indicator);
     gtk_label_set_label(GTK_LABEL(title_label), song->title);
 
     GtkWidget* artist_label = gtk_widget_get_next_sibling(title_label);
@@ -917,19 +975,26 @@ void app_activate_cb(GtkApplication* app) {
     gtk_stack_add_titled(mmp_app->content_stack, artists_page, "artists", "Artists");
 
     // Page: Queue
-    GtkWidget* queue_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_add_css_class(queue_page_box, "content-page");
+    {
+        GtkWidget* page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+        gtk_widget_add_css_class(page_box, "content-page");
 
-    GtkWidget* queue_scrolled = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(queue_scrolled, TRUE);
-    gtk_box_append(GTK_BOX(queue_page_box), queue_scrolled);
+        GtkWidget* scrolled = gtk_scrolled_window_new();
+        gtk_widget_set_vexpand(scrolled, TRUE);
+        gtk_box_append(GTK_BOX(page_box), scrolled);
 
-    mmp_app->queue_list = GTK_LIST_BOX(gtk_list_box_new());
-    gtk_list_box_set_selection_mode(mmp_app->queue_list, GTK_SELECTION_NONE);
-    gtk_widget_add_css_class(GTK_WIDGET(mmp_app->queue_list), "library-list");
-    gtk_widget_add_css_class(GTK_WIDGET(mmp_app->queue_list), "boxed-list");
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(queue_scrolled), GTK_WIDGET(mmp_app->queue_list));
-    gtk_stack_add_titled(mmp_app->content_stack, queue_page_box, "queue", "Queue");
+        mmp_app->queue_store = g_list_store_new(MMP_TYPE_SONG_ITEM);
+        GtkSingleSelection* sel = gtk_single_selection_new(G_LIST_MODEL(mmp_app->queue_store));
+        GtkListItemFactory* factory = gtk_signal_list_item_factory_new();
+        g_signal_connect(factory, "setup", G_CALLBACK(queue_factory_setup), NULL);
+        g_signal_connect(factory, "bind", G_CALLBACK(queue_factory_bind), NULL);
+        mmp_app->queue_view = GTK_LIST_VIEW(gtk_list_view_new(GTK_SELECTION_MODEL(sel), factory));
+        gtk_widget_add_css_class(GTK_WIDGET(mmp_app->queue_view), "library-list");
+        gtk_widget_add_css_class(GTK_WIDGET(mmp_app->queue_view), "boxed-list");
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(mmp_app->queue_view));
+
+        gtk_stack_add_titled(mmp_app->content_stack, page_box, "queue", "Queue");
+    }
 
     // Page: Settings
     GtkWidget* settings_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
@@ -959,7 +1024,7 @@ void app_activate_cb(GtkApplication* app) {
     g_signal_connect(mmp_app->song_view, "activate", G_CALLBACK(song_view_activate_cb), mmp_app);
     g_signal_connect(mmp_app->albums_list, "row-activated", G_CALLBACK(album_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->artists_list, "row-activated", G_CALLBACK(artist_row_activated_cb), mmp_app);
-    g_signal_connect(mmp_app->queue_list, "row-activated", G_CALLBACK(queue_row_activated_cb), mmp_app);
+    g_signal_connect(mmp_app->queue_view, "activate", G_CALLBACK(queue_view_activate_cb), mmp_app);
 
     GtkGesture* playlists_right_click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(playlists_right_click), GDK_BUTTON_SECONDARY);

@@ -42,5 +42,6 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
 void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data);
 gboolean on_drop_cb(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
 void song_view_activate_cb(GtkListView* view, guint position, gpointer user_data);
+void queue_view_activate_cb(GtkListView* view, guint position, gpointer user_data);
 
 #endif // MMP_UI_CALLBACKS_H
