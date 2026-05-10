@@ -21,5 +21,6 @@ GtkWidget* create_song_row_box(Song* song);
 void free_song(Song* song);
 void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend, bool own_song);
 void ui_populate_songs(MmpApp* app, GList* songs, bool own_songs);
+void ui_update_search_lowered_text(MmpApp* app, GtkSearchEntry* entry);
 
 #endif // MMP_UI_H

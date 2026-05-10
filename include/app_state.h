@@ -64,6 +64,7 @@ typedef struct {
     GList* current_view_base_list; // Weak reference or owned list
     bool current_view_base_list_owned;
     bool current_view_reverse;
+    char* search_lowered_text;
 } MmpApp;
 
 #endif // MMP_APP_STATE_H

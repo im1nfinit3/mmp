@@ -298,11 +298,21 @@ void ui_refresh_view(MmpApp* app) {
     ui_refresh_view_list(app, app->songs_list, app->current_view_base_list, app->current_view_reverse);
 }
 
-bool search_filter_func(Song* song, gpointer user_data) {
-    const char* search_text = user_data;
-    if (!search_text || strlen(search_text) == 0) return true;
+void ui_update_search_lowered_text(MmpApp* app, GtkSearchEntry* entry) {
+    g_free(app->search_lowered_text);
+    app->search_lowered_text = NULL;
 
-    char* search_lower = g_utf8_strdown(search_text, -1);
+    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(entry));
+    if (search_text && search_text[0] != '\0') {
+        app->search_lowered_text = g_utf8_strdown(search_text, -1);
+    }
+}
+
+bool search_filter_func(Song* song, gpointer user_data) {
+    MmpApp* app = user_data;
+    const char* search_lower = app->search_lowered_text;
+    if (!search_lower || search_lower[0] == '\0') return true;
+
     char* title_lower = g_utf8_strdown(song->title, -1);
     char* artist_lower = g_utf8_strdown(song->artist, -1);
     char* album_lower = g_utf8_strdown(song->album, -1);
@@ -311,7 +321,6 @@ bool search_filter_func(Song* song, gpointer user_data) {
                    (strstr(artist_lower, search_lower) != NULL) ||
                    (strstr(album_lower, search_lower) != NULL);
 
-    g_free(search_lower);
     g_free(title_lower);
     g_free(artist_lower);
     g_free(album_lower);

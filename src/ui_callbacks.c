@@ -39,10 +39,8 @@ static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
     app->current_view_reverse = false;
     ui_clear_filters(app);
     
-    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
-    if (search_text && strlen(search_text) > 0) {
-        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
-    }
+    ui_update_search_lowered_text(app, app->songs_search_entry);
+    ui_add_filter(app, search_filter_func, app, NULL);
 
     ui_refresh_view(app);
     // Note: in a real app, we'd need to manage the lifecycle of 'songs' GList and its Song objects.
@@ -274,8 +272,8 @@ gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data) {
 }
 
 void search_changed_cb(GtkSearchEntry* entry, gpointer user_data) {
-    (void)entry;
     MmpApp* app = user_data;
+    ui_update_search_lowered_text(app, entry);
     ui_refresh_view(app);
 }
 
@@ -318,10 +316,8 @@ void album_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     }
     ui_add_filter(app, album_filter_func, g_strdup(app->selected_album_filter), g_free);
     
-    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
-    if (search_text && strlen(search_text) > 0) {
-        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
-    }
+    ui_update_search_lowered_text(app, app->songs_search_entry);
+    ui_add_filter(app, search_filter_func, app, NULL);
     
     ui_refresh_view(app);
     
@@ -705,10 +701,8 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
 
         ui_set_view(mmp_app, base_list, owned, reverse);
 
-        const char* search_text = gtk_editable_get_text(GTK_EDITABLE(mmp_app->songs_search_entry));
-        if (search_text && strlen(search_text) > 0) {
-            ui_add_filter(mmp_app, search_filter_func, (gpointer)search_text, NULL);
-        }
+        ui_update_search_lowered_text(mmp_app, mmp_app->songs_search_entry);
+        ui_add_filter(mmp_app, search_filter_func, mmp_app, NULL);
 
         ui_refresh_view(mmp_app);
         gtk_stack_set_visible_child_name(rows->stack, page_name);
