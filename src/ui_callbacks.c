@@ -39,10 +39,8 @@ static void ui_show_playlist_contents(MmpApp* app, Playlist* p) {
     app->current_view_reverse = false;
     ui_clear_filters(app);
     
-    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
-    if (search_text && strlen(search_text) > 0) {
-        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
-    }
+    ui_update_search_lowered_text(app, app->songs_search_entry);
+    ui_add_filter(app, search_filter_func, app, NULL);
 
     ui_refresh_view(app);
     // Note: in a real app, we'd need to manage the lifecycle of 'songs' GList and its Song objects.
@@ -194,10 +192,10 @@ static void show_song_context_menu(Song* song, double x, double y, GtkWidget* pa
 void song_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
     (void)user_data;
     if (n_press != 1) return;
-    GtkWidget* row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
-    Song* song = g_object_get_data(G_OBJECT(row), "song-data");
+    GtkWidget* widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    Song* song = g_object_get_data(G_OBJECT(widget), "song-data");
     if (song) {
-        show_song_context_menu(song, x, y, row);
+        show_song_context_menu(song, x, y, widget);
     }
 }
 
@@ -274,8 +272,8 @@ gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data) {
 }
 
 void search_changed_cb(GtkSearchEntry* entry, gpointer user_data) {
-    (void)entry;
     MmpApp* app = user_data;
+    ui_update_search_lowered_text(app, entry);
     ui_refresh_view(app);
 }
 
@@ -318,10 +316,8 @@ void album_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     }
     ui_add_filter(app, album_filter_func, g_strdup(app->selected_album_filter), g_free);
     
-    const char* search_text = gtk_editable_get_text(GTK_EDITABLE(app->songs_search_entry));
-    if (search_text && strlen(search_text) > 0) {
-        ui_add_filter(app, search_filter_func, (gpointer)search_text, NULL);
-    }
+    ui_update_search_lowered_text(app, app->songs_search_entry);
+    ui_add_filter(app, search_filter_func, app, NULL);
     
     ui_refresh_view(app);
     
@@ -339,13 +335,33 @@ void song_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_d
     }
 }
 
+void song_view_activate_cb(GtkListView* view, guint position, gpointer user_data) {
+    MmpApp* app = user_data;
+    GtkSelectionModel* sel = gtk_list_view_get_model(view);
+    GObject* obj = g_list_model_get_item(G_LIST_MODEL(sel), position);
+    if (obj) {
+        MmpSongItem* item = MMP_SONG_ITEM(obj);
+        if (item->song) {
+            play_song(app, item->song);
+        }
+        g_object_unref(obj);
+    }
+}
+
 void queue_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_data) {
     (void)list;
     MmpApp* app = user_data;
     GList* node = g_object_get_data(G_OBJECT(row), "playlist-node");
     if (node) {
         playback_play_track(app, node);
-        ui_update_queue(app);
+    }
+}
+
+void queue_view_activate_cb(GtkListView* view, guint position, gpointer user_data) {
+    MmpApp* app = user_data;
+    GList* node = g_queue_peek_nth_link(app->playlist, position);
+    if (node) {
+        playback_play_track(app, node);
     }
 }
 
@@ -657,11 +673,7 @@ void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, do
 }
 
 static Song* find_song_in_library(MmpApp* app, const char* path) {
-    for (GList* l = app->library; l != NULL; l = l->next) {
-        Song* s = l->data;
-        if (g_strcmp0(s->path, path) == 0) return s;
-    }
-    return NULL;
+    return g_hash_table_lookup(app->library_by_path, path);
 }
 
 void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data) {
@@ -689,8 +701,9 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
                 for (GList* l = playlist_songs; l != NULL; l = l->next) {
                     Song* ps = l->data;
                     Song* ls = find_song_in_library(mmp_app, ps->path);
-                    if (ls) projected = g_list_append(projected, ls);
+                    if (ls) projected = g_list_prepend(projected, ls);
                 }
+                projected = g_list_reverse(projected);
                 g_list_free_full(playlist_songs, (GDestroyNotify)free_song);
                 base_list = projected;
                 owned = true;
@@ -705,10 +718,8 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
 
         ui_set_view(mmp_app, base_list, owned, reverse);
 
-        const char* search_text = gtk_editable_get_text(GTK_EDITABLE(mmp_app->songs_search_entry));
-        if (search_text && strlen(search_text) > 0) {
-            ui_add_filter(mmp_app, search_filter_func, (gpointer)search_text, NULL);
-        }
+        ui_update_search_lowered_text(mmp_app, mmp_app->songs_search_entry);
+        ui_add_filter(mmp_app, search_filter_func, mmp_app, NULL);
 
         ui_refresh_view(mmp_app);
         gtk_stack_set_visible_child_name(rows->stack, page_name);
