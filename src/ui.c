@@ -354,6 +354,38 @@ GList* ui_get_filtered_songs(MmpApp* app) {
     return g_list_reverse(filtered);
 }
 
+void ui_update_now_playing(MmpApp* app, const char* old_path) {
+    const char* new_path = app->current_file_path;
+
+    if (app->song_store) {
+        guint n = g_list_model_get_n_items(G_LIST_MODEL(app->song_store));
+        for (guint i = 0; i < n; i++) {
+            GObject* obj = g_list_model_get_item(G_LIST_MODEL(app->song_store), i);
+            MmpSongItem* item = MMP_SONG_ITEM(obj);
+            const char* path = item->song->path;
+            if (g_strcmp0(path, old_path) == 0 || g_strcmp0(path, new_path) == 0) {
+                g_list_store_remove(app->song_store, i);
+                g_list_store_insert(app->song_store, i, obj);
+            }
+            g_object_unref(obj);
+        }
+    }
+
+    if (app->queue_store) {
+        guint n = g_list_model_get_n_items(G_LIST_MODEL(app->queue_store));
+        for (guint i = 0; i < n; i++) {
+            GObject* obj = g_list_model_get_item(G_LIST_MODEL(app->queue_store), i);
+            MmpSongItem* item = MMP_SONG_ITEM(obj);
+            const char* path = item->song->path;
+            if (g_strcmp0(path, old_path) == 0 || g_strcmp0(path, new_path) == 0) {
+                g_list_store_remove(app->queue_store, i);
+                g_list_store_insert(app->queue_store, i, obj);
+            }
+            g_object_unref(obj);
+        }
+    }
+}
+
 void ui_refresh_view(MmpApp* app) {
     if (!app->song_store) return;
 

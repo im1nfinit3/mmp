@@ -354,7 +354,6 @@ void queue_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_
     GList* node = g_object_get_data(G_OBJECT(row), "playlist-node");
     if (node) {
         playback_play_track(app, node);
-        ui_update_queue(app);
     }
 }
 
@@ -363,7 +362,6 @@ void queue_view_activate_cb(GtkListView* view, guint position, gpointer user_dat
     GList* node = g_queue_peek_nth_link(app->playlist, position);
     if (node) {
         playback_play_track(app, node);
-        ui_update_queue(app);
     }
 }
 

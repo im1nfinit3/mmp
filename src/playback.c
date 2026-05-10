@@ -95,7 +95,6 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
             GList* next = playback_get_next_node(app);
             if (next) {
                 playback_play_track(app, next);
-                ui_update_queue(app);
             } else {
                 gst_element_set_state(app->playbin, GST_STATE_READY);
                 gtk_button_set_icon_name(app->play_pause_button, "media-playback-start-symbolic");
@@ -214,7 +213,9 @@ void playback_repeat_toggle(MmpApp* app) {
 
 void playback_play_track(MmpApp* app, GList* node) {
     if (node == NULL) return;
-    
+
+    const char* old_path = app->current_file_path;
+
     app->current_track_node = node;
     char* path = node->data;
     
@@ -242,8 +243,7 @@ void playback_play_track(MmpApp* app, GList* node) {
         gtk_button_set_icon_name(app->play_pause_button, "media-playback-pause-symbolic");
         g_free(uri);
     }
-    ui_update_queue(app);
-    ui_refresh_view(app);
+    ui_update_now_playing(app, old_path);
 }
 
 static GList* playback_add_to_playlist_internal(MmpApp* app, const char* path, bool play_now, bool update_ui) {
