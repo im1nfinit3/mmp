@@ -703,8 +703,9 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
                 for (GList* l = playlist_songs; l != NULL; l = l->next) {
                     Song* ps = l->data;
                     Song* ls = find_song_in_library(mmp_app, ps->path);
-                    if (ls) projected = g_list_append(projected, ls);
+                    if (ls) projected = g_list_prepend(projected, ls);
                 }
+                projected = g_list_reverse(projected);
                 g_list_free_full(playlist_songs, (GDestroyNotify)free_song);
                 base_list = projected;
                 owned = true;

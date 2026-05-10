@@ -59,7 +59,7 @@ typedef struct {
     GtkListBox* navigation_list;
     bool shuffle_mode;
     RepeatMode repeat_mode;
-    GList* unplayed_pool;
+    GPtrArray* unplayed_pool;
     sqlite3* db;
     sqlite3* library_db;
     int current_playlist_id;

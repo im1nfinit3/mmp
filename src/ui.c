@@ -410,9 +410,20 @@ bool album_filter_func(Song* song, gpointer user_data) {
 
 
 static void add_song_to_ui(MmpApp* app, Song* song) {
-    // If the library is the base list for the current view, refresh it
-    if (app->current_view_base_list == app->library) {
-        ui_refresh_view(app);
+    if (app->current_view_base_list == app->library && app->song_store) {
+        bool pass = true;
+        for (GList* f = app->current_view_filters; f != NULL; f = f->next) {
+            SongFilter* filter = f->data;
+            if (!filter->filter(song, filter->user_data)) { pass = false; break; }
+        }
+        if (pass) {
+            MmpSongItem* item = mmp_song_item_new(song);
+            if (app->current_view_reverse)
+                g_list_store_insert(app->song_store, 0, G_OBJECT(item));
+            else
+                g_list_store_append(app->song_store, G_OBJECT(item));
+            g_object_unref(item);
+        }
     }
     
     add_to_library_ui(app, song);
@@ -923,11 +934,12 @@ void app_activate_cb(GtkApplication* app) {
     GList* cached_songs = db_get_all_songs(mmp_app->library_db);
     for (GList* l = cached_songs; l != NULL; l = l->next) {
         Song* s = l->data;
-        mmp_app->library = g_list_append(mmp_app->library, s);
+        mmp_app->library = g_list_prepend(mmp_app->library, s);
         g_hash_table_insert(mmp_app->library_by_path, s->path, s);
         add_to_library_ui(mmp_app, s);
     }
     g_list_free(cached_songs);
+    mmp_app->library = g_list_reverse(mmp_app->library);
 
     gtk_list_box_set_filter_func(mmp_app->albums_list, filter_albums_cb, mmp_app, NULL);
     g_signal_connect(mmp_app->songs_search_entry, "search-changed", G_CALLBACK(search_changed_cb), mmp_app);
