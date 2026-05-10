@@ -76,14 +76,7 @@ void ui_update_queue(MmpApp* app) {
     while (iter) {
         const char* path = iter->data;
 
-        Song* found_song = NULL;
-        for (GList* l = app->library; l != NULL; l = l->next) {
-            Song* s = (Song*)l->data;
-            if (g_strcmp0(s->path, path) == 0) {
-                found_song = s;
-                break;
-            }
-        }
+        Song* found_song = g_hash_table_lookup(app->library_by_path, path);
 
         MmpSongItem* item;
         if (found_song) {
@@ -433,6 +426,7 @@ typedef struct {
 static gboolean add_song_idle_cb(gpointer user_data) {
     SongUpdateData* data = user_data;
     data->app->library = g_list_append(data->app->library, data->song);
+    g_hash_table_insert(data->app->library_by_path, data->song->path, data->song);
     add_song_to_ui(data->app, data->song);
     g_free(data);
     return FALSE;
@@ -925,10 +919,12 @@ void app_activate_cb(GtkApplication* app) {
     g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), mmp_app);
 
     // Load cached library
+    mmp_app->library_by_path = g_hash_table_new(g_str_hash, g_str_equal);
     GList* cached_songs = db_get_all_songs(mmp_app->library_db);
     for (GList* l = cached_songs; l != NULL; l = l->next) {
         Song* s = l->data;
         mmp_app->library = g_list_append(mmp_app->library, s);
+        g_hash_table_insert(mmp_app->library_by_path, s->path, s);
         add_to_library_ui(mmp_app, s);
     }
     g_list_free(cached_songs);

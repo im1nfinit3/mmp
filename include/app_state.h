@@ -50,6 +50,7 @@ typedef struct {
     GQueue* playlist;
     GList* current_track_node;
     GList* library;
+    GHashTable* library_by_path;
     bool volume_muted;
     bool is_programmatic_change;
     char* selected_artist_filter;

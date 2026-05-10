@@ -76,21 +76,17 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
                     gtk_label_set_label(app->current_track_label, label);
                     g_free(label);
 
-                    // Update library metadata with real tags discovered during playback
-                    for (GList* l = app->library; l != NULL; l = l->next) {
-                        Song* s = (Song*)l->data;
-                        if (g_strcmp0(s->path, app->current_file_path) == 0) {
-                            if (title) {
-                                g_free(s->title);
-                                s->title = g_strdup(title);
-                            }
-                            if (artist) {
-                                g_free(s->artist);
-                                s->artist = g_strdup(artist);
-                            }
-                            db_save_song(app->library_db, s);
-                            break;
+                    Song* s = g_hash_table_lookup(app->library_by_path, app->current_file_path);
+                    if (s) {
+                        if (title) {
+                            g_free(s->title);
+                            s->title = g_strdup(title);
                         }
+                        if (artist) {
+                            g_free(s->artist);
+                            s->artist = g_strdup(artist);
+                        }
+                        db_save_song(app->library_db, s);
                     }
                     ui_update_queue(app);
                 }
@@ -240,15 +236,7 @@ void playback_play_track(MmpApp* app, GList* node) {
         g_object_set(app->playbin, "uri", uri, NULL);
         gst_element_set_state(app->playbin, GST_STATE_PLAYING);
         
-        // Try to find the song in the library to get immediate metadata
-        Song* found_song = NULL;
-        for (GList* l = app->library; l != NULL; l = l->next) {
-            Song* s = (Song*)l->data;
-            if (g_strcmp0(s->path, path) == 0) {
-                found_song = s;
-                break;
-            }
-        }
+        Song* found_song = g_hash_table_lookup(app->library_by_path, path);
 
         if (found_song) {
             char* label = g_strdup_printf("%s - %s", found_song->artist, found_song->title);

@@ -675,11 +675,7 @@ void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, do
 }
 
 static Song* find_song_in_library(MmpApp* app, const char* path) {
-    for (GList* l = app->library; l != NULL; l = l->next) {
-        Song* s = l->data;
-        if (g_strcmp0(s->path, path) == 0) return s;
-    }
-    return NULL;
+    return g_hash_table_lookup(app->library_by_path, path);
 }
 
 void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data) {
