@@ -17,6 +17,13 @@ void playback_rebuild_unplayed_pool(MmpApp* app) {
     }
 }
 
+static GList* playback_queue_find(MmpApp* app, const char* path) {
+    for (GList* l = app->playlist->head; l != NULL; l = l->next) {
+        if (g_strcmp0((const char*)l->data, path) == 0) return l;
+    }
+    return NULL;
+}
+
 static GList* playback_get_next_node(MmpApp* app) {
     if (app->repeat_mode == REPEAT_ONE && app->current_track_node) {
         return app->current_track_node;
@@ -287,6 +294,60 @@ void playback_open_file(MmpApp* app, const char* path) {
     app->current_track_node = NULL;
     
     playback_add_to_playlist(app, path, true);
+}
+
+void playback_play_from_library(MmpApp* app, const char* path) {
+    GList* node = playback_queue_find(app, path);
+
+    if (node) {
+        playback_play_track(app, node);
+    } else {
+        g_queue_push_head(app->playlist, g_strdup(path));
+        playback_play_track(app, app->playlist->head);
+        ui_update_queue(app);
+    }
+    playback_rebuild_unplayed_pool(app);
+}
+
+void playback_load_playlist(MmpApp* app, int playlist_id, const char* start_song_path) {
+    GList* songs = db_get_playlist_songs(app->db, playlist_id);
+    if (!songs) return;
+
+    playback_clear_playlist(app);
+
+    for (GList* l = songs; l != NULL; l = l->next) {
+        Song* s = l->data;
+        playback_add_to_playlist_internal(app, s->path, false, false);
+    }
+
+    GList* start_node = NULL;
+
+    if (start_song_path) {
+        for (GList* l = app->playlist->head; l != NULL; l = l->next) {
+            if (g_strcmp0((const char*)l->data, start_song_path) == 0) {
+                start_node = l;
+                break;
+            }
+        }
+    }
+
+    if (!start_node) {
+        if (app->shuffle_mode) {
+            int len = g_queue_get_length(app->playlist);
+            int start_idx = g_random_int_range(0, len);
+            start_node = g_queue_peek_nth_link(app->playlist, start_idx);
+        } else {
+            start_node = app->playlist->head;
+        }
+    }
+
+    if (start_node) {
+        playback_play_track(app, start_node);
+    }
+
+    playback_rebuild_unplayed_pool(app);
+    ui_update_queue(app);
+    g_list_free_full(songs, (GDestroyNotify)free_song);
 }
 
 void playback_toggle_pause(MmpApp* app) {
