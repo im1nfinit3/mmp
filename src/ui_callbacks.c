@@ -66,7 +66,11 @@ static void song_properties_cb(GtkWidget* widget, gpointer user_data) {
 
 static void song_play_now_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {    (void)action; (void)parameter;
     Song* song = user_data;
-    playback_open_file(mmp_app, song->path);
+    if (mmp_app->current_playlist_id > 0) {
+        playback_load_playlist(mmp_app, mmp_app->current_playlist_id, song->path);
+    } else {
+        playback_play_from_library(mmp_app, song->path);
+    }
 }
 
 static void song_play_next_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
@@ -216,11 +220,14 @@ static void queue_clear_action_cb(GSimpleAction* action, GVariant* parameter, gp
     playback_clear_playlist(mmp_app);
 }
 
+static void queue_save_as_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data);
+
 static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* parent_row) {
     GSimpleActionGroup* action_group = g_simple_action_group_new();
     const GActionEntry actions[] = {
         { "play_now", queue_play_now_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "remove", queue_remove_action_cb, NULL, NULL, NULL, {0, 0, 0} },
+        { "save_playlist", queue_save_as_playlist_action_cb, NULL, NULL, NULL, {0, 0, 0} },
         { "clear", queue_clear_action_cb, NULL, NULL, NULL, {0, 0, 0} }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(action_group), actions, G_N_ELEMENTS(actions), node);
@@ -231,6 +238,11 @@ static void show_queue_context_menu(GList* node, double x, double y, GtkWidget* 
     g_menu_append(menu, "Remove from Queue", "queue.remove");
     
     GMenu* section = g_menu_new();
+    g_menu_append(section, "Save Queue as Playlist", "queue.save_playlist");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+    
+    section = g_menu_new();
     g_menu_append(section, "Clear Queue", "queue.clear");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
     g_object_unref(section);
@@ -257,7 +269,11 @@ void queue_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double 
 }
 
 static void play_song(MmpApp* app, Song* song) {
-    playback_open_file(app, song->path);
+    if (app->current_playlist_id > 0) {
+        playback_load_playlist(app, app->current_playlist_id, song->path);
+    } else {
+        playback_play_from_library(app, song->path);
+    }
 }
 
 gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data) {
@@ -609,38 +625,12 @@ void playlist_row_right_clicked_cb(GtkGestureClick* gesture, int n_press, double
 void playlist_row_double_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
     (void)x; (void)y;
     if (n_press != 2) return;
-    
+
     GtkListBoxRow* row = user_data;
     Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
     if (!p) return;
 
-    GList* songs = db_get_playlist_songs(mmp_app->db, p->id);
-    if (!songs) return;
-
-    playback_clear_playlist(mmp_app);
-    
-    GList* start_node_ptr = NULL;
-    GList* start_song_data = songs;
-
-    if (mmp_app->shuffle_mode) {
-        int len = g_list_length(songs);
-        int start_idx = g_random_int_range(0, len);
-        start_song_data = g_list_nth(songs, start_idx);
-    }
-
-    for (GList* l = songs; l != NULL; l = l->next) {
-        Song* s = l->data;
-        GList* added_node = playback_add_to_playlist(mmp_app, s->path, false);
-        if (l == start_song_data) {
-            start_node_ptr = added_node;
-        }
-    }
-    
-    if (start_node_ptr) {
-        playback_play_track(mmp_app, start_node_ptr);
-    }
-    
-    g_list_free_full(songs, (GDestroyNotify)free_song);
+    playback_load_playlist(mmp_app, p->id, NULL);
 }
 
 static void create_playlist_clicked_cb(GtkButton* button, gpointer user_data) {
@@ -652,6 +642,28 @@ static void create_playlist_clicked_cb(GtkButton* button, gpointer user_data) {
 void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
     (void)action; (void)parameter;
     create_playlist_clicked_cb(NULL, user_data);
+}
+
+static void on_save_queue_as_playlist_done(const char* name, gpointer user_data) {
+    if (!name || strlen(name) == 0) return;
+    MmpApp* app = user_data;
+
+    int new_id;
+    if (!db_create_playlist(app->db, name, &new_id)) return;
+
+    for (GList* l = app->playlist->head; l != NULL; l = l->next) {
+        Song* song = g_hash_table_lookup(app->library_by_path, (const char*)l->data);
+        if (song) {
+            db_add_song_to_playlist(app->db, new_id, song);
+        }
+    }
+
+    ui_update_playlists(app);
+}
+
+static void queue_save_as_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
+    (void)action; (void)parameter; (void)user_data;
+    show_entry_dialog(GTK_WINDOW(mmp_app->window), "Save Queue as Playlist", "New Playlist", on_save_queue_as_playlist_done, mmp_app);
 }
 
 void playlists_header_right_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {

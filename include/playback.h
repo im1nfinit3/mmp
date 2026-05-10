@@ -8,6 +8,8 @@ void playback_play_track(MmpApp* app, GList* node);
 GList* playback_add_to_playlist(MmpApp* app, const char* path, bool play_now);
 void playback_add_songs_to_playlist(MmpApp* app, GList* songs);
 void playback_open_file(MmpApp* app, const char* path);
+void playback_play_from_library(MmpApp* app, const char* path);
+void playback_load_playlist(MmpApp* app, int playlist_id, const char* start_song_path);
 void playback_toggle_pause(MmpApp* app);
 void playback_seek(MmpApp* app, double seconds);
 void playback_set_volume(MmpApp* app, double volume);
