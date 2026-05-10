@@ -66,7 +66,11 @@ static void song_properties_cb(GtkWidget* widget, gpointer user_data) {
 
 static void song_play_now_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {    (void)action; (void)parameter;
     Song* song = user_data;
-    playback_open_file(mmp_app, song->path);
+    if (mmp_app->current_playlist_id > 0) {
+        playback_load_playlist(mmp_app, mmp_app->current_playlist_id, song->path);
+    } else {
+        playback_play_from_library(mmp_app, song->path);
+    }
 }
 
 static void song_play_next_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data) {
@@ -257,7 +261,11 @@ void queue_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double 
 }
 
 static void play_song(MmpApp* app, Song* song) {
-    playback_open_file(app, song->path);
+    if (app->current_playlist_id > 0) {
+        playback_load_playlist(app, app->current_playlist_id, song->path);
+    } else {
+        playback_play_from_library(app, song->path);
+    }
 }
 
 gboolean filter_albums_cb(GtkListBoxRow* row, gpointer user_data) {
@@ -609,38 +617,12 @@ void playlist_row_right_clicked_cb(GtkGestureClick* gesture, int n_press, double
 void playlist_row_double_clicked_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
     (void)x; (void)y;
     if (n_press != 2) return;
-    
+
     GtkListBoxRow* row = user_data;
     Playlist* p = g_object_get_data(G_OBJECT(row), "playlist");
     if (!p) return;
 
-    GList* songs = db_get_playlist_songs(mmp_app->db, p->id);
-    if (!songs) return;
-
-    playback_clear_playlist(mmp_app);
-    
-    GList* start_node_ptr = NULL;
-    GList* start_song_data = songs;
-
-    if (mmp_app->shuffle_mode) {
-        int len = g_list_length(songs);
-        int start_idx = g_random_int_range(0, len);
-        start_song_data = g_list_nth(songs, start_idx);
-    }
-
-    for (GList* l = songs; l != NULL; l = l->next) {
-        Song* s = l->data;
-        GList* added_node = playback_add_to_playlist(mmp_app, s->path, false);
-        if (l == start_song_data) {
-            start_node_ptr = added_node;
-        }
-    }
-    
-    if (start_node_ptr) {
-        playback_play_track(mmp_app, start_node_ptr);
-    }
-    
-    g_list_free_full(songs, (GDestroyNotify)free_song);
+    playback_load_playlist(mmp_app, p->id, NULL);
 }
 
 static void create_playlist_clicked_cb(GtkButton* button, gpointer user_data) {
