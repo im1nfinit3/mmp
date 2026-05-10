@@ -22,15 +22,28 @@ Single-binary GTK4 desktop music player. Five source modules:
 | File | Role |
 |------|------|
 | `src/main.c` | Entry point: GStreamer init, `GtkApplication`, signal wiring |
-| `src/ui.c` | Window, layout, library population, async directory scan |
+| `src/ui.c` | Window layout, `GListStore`-backed song/queue views with `GtkSignalListItemFactory`, library population, async directory scan, `ui_update_now_playing` for lightweight track-change UI updates |
 | `src/ui_callbacks.c` | Signal handlers, context menus, drag-drop, playlist dialogs |
-| `src/playback.c` | GStreamer `playbin`, queue, shuffle, repeat, seek, volume |
+| `src/playback.c` | GStreamer `playbin`, queue, shuffle (via `GPtrArray` unplayed pool), repeat, seek, volume |
 | `src/database.c` | SQLite wrapper: `songs`, `playlists`, `playlist_songs` tables |
 
 Headers in `include/`. The central state struct `MmpApp` is in `include/app_state.h`.
 
 A global `mmp_app` pointer (`extern` from `ui_callbacks.h`, defined in `ui.c`) holds all
 app state — widgets, playback, queue, DB handles, filters, etc.
+
+### Key data structures
+
+- **`app->library`** is a `GList` of `Song*`. An accompanying `GHashTable* library_by_path`
+  maps `song->path → Song*` for O(1) lookup — use `g_hash_table_lookup` instead of
+  scanning `app->library`.
+- **`app->unplayed_pool`** is a `GPtrArray` of `GList*` playlist-node pointers for
+  shuffle mode. O(1) indexed access via `g_ptr_array_index`, O(1) add/remove
+  via `g_ptr_array_add` / `g_ptr_array_remove_index_fast`.
+- **Song/queue lists** use `GListStore` + `GtkSingleSelection` + `GtkListView` with
+  `GtkSignalListItemFactory` (`setup`/`bind` callbacks). Track-change indicator updates
+  go through `ui_update_now_playing`, not full store rebuilds. Full rebuilds via
+  `ui_refresh_view` only on view/filter changes.
 
 ## Code generation
 
