@@ -37,10 +37,12 @@ typedef struct {
     GtkButton* play_pause_button;
     GtkButton* shuffle_button;
     GtkButton* repeat_button;
-    GtkListBox* songs_list;
+    GtkListView* song_view;
+    GListStore* song_store;
     GtkListBox* albums_list;
     GtkListBox* artists_list;
-    GtkListBox* queue_list;
+    GtkListView* queue_view;
+    GListStore* queue_store;
     GtkSearchEntry* songs_search_entry;
     GstElement* playbin;
     GstDiscoverer* discoverer;
@@ -48,6 +50,7 @@ typedef struct {
     GQueue* playlist;
     GList* current_track_node;
     GList* library;
+    GHashTable* library_by_path;
     bool volume_muted;
     bool is_programmatic_change;
     char* selected_artist_filter;
@@ -56,14 +59,16 @@ typedef struct {
     GtkListBox* navigation_list;
     bool shuffle_mode;
     RepeatMode repeat_mode;
-    GList* unplayed_pool;
+    GPtrArray* unplayed_pool;
     sqlite3* db;
     sqlite3* library_db;
     int current_playlist_id;
+    GList* queue_fallback_songs;
     GList* current_view_filters; // List of SongFilter*
     GList* current_view_base_list; // Weak reference or owned list
     bool current_view_base_list_owned;
     bool current_view_reverse;
+    char* search_lowered_text;
 } MmpApp;
 
 #endif // MMP_APP_STATE_H

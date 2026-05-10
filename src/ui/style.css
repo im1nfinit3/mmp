@@ -8,7 +8,7 @@ window, .app-root, .main-shell, .content-stack, .content-page {
   padding: 8px 12px;
 }
 
-.nav-pane, .library-panel, list.library-list, list.library-list row {
+.nav-pane, .library-panel, .library-list, .library-list row {
   background: #111111;
 }
 
@@ -101,12 +101,12 @@ list.navigation-list row.nav-header { opacity: 0.6; }
 .nav-sub-row .row-label { padding-left: 24px; }
 
 list.navigation-list row:hover,
-list.library-list row:hover {
+.library-list row:hover {
   background: #252525;
 }
 
 list.navigation-list row:selected,
-list.library-list row:selected {
+.library-list row:selected {
   color: #ffffff;
   background: #3a3a3a;
 }
