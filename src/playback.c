@@ -5,17 +5,14 @@
 #include <gst/pbutils/pbutils.h>
 
 void playback_rebuild_unplayed_pool(MmpApp* app) {
-    if (app->unplayed_pool) {
-        g_list_free(app->unplayed_pool);
-        app->unplayed_pool = NULL;
-    }
+    g_clear_pointer(&app->unplayed_pool, g_ptr_array_unref);
     
     if (!app->shuffle_mode) return;
     
+    app->unplayed_pool = g_ptr_array_new();
     for (GList* l = app->playlist->head; l != NULL; l = l->next) {
-        // Don't add current track to pool if we just started shuffling
         if (l != app->current_track_node) {
-            app->unplayed_pool = g_list_append(app->unplayed_pool, l);
+            g_ptr_array_add(app->unplayed_pool, l);
         }
     }
 }
@@ -34,14 +31,11 @@ static GList* playback_get_next_node(MmpApp* app) {
             }
         }
         
-        if (app->unplayed_pool == NULL) return NULL;
+        if (app->unplayed_pool == NULL || app->unplayed_pool->len == 0) return NULL;
         
-        int length = g_list_length(app->unplayed_pool);
-        int index = g_random_int_range(0, length);
-        GList* pool_link = g_list_nth(app->unplayed_pool, index);
-        GList* playlist_node = pool_link->data;
-        
-        app->unplayed_pool = g_list_delete_link(app->unplayed_pool, pool_link);
+        guint index = g_random_int_range(0, (gint32)app->unplayed_pool->len);
+        GList* playlist_node = g_ptr_array_index(app->unplayed_pool, index);
+        g_ptr_array_remove_index_fast(app->unplayed_pool, index);
         return playlist_node;
     } else {
         if (app->current_track_node && app->current_track_node->next) {
@@ -76,21 +70,17 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
                     gtk_label_set_label(app->current_track_label, label);
                     g_free(label);
 
-                    // Update library metadata with real tags discovered during playback
-                    for (GList* l = app->library; l != NULL; l = l->next) {
-                        Song* s = (Song*)l->data;
-                        if (g_strcmp0(s->path, app->current_file_path) == 0) {
-                            if (title) {
-                                g_free(s->title);
-                                s->title = g_strdup(title);
-                            }
-                            if (artist) {
-                                g_free(s->artist);
-                                s->artist = g_strdup(artist);
-                            }
-                            db_save_song(app->library_db, s);
-                            break;
+                    Song* s = g_hash_table_lookup(app->library_by_path, app->current_file_path);
+                    if (s) {
+                        if (title) {
+                            g_free(s->title);
+                            s->title = g_strdup(title);
                         }
+                        if (artist) {
+                            g_free(s->artist);
+                            s->artist = g_strdup(artist);
+                        }
+                        db_save_song(app->library_db, s);
                     }
                     ui_update_queue(app);
                 }
@@ -105,7 +95,6 @@ static void playbin_bus_message_cb(GstBus* bus, GstMessage* msg, gpointer user_d
             GList* next = playback_get_next_node(app);
             if (next) {
                 playback_play_track(app, next);
-                ui_update_queue(app);
             } else {
                 gst_element_set_state(app->playbin, GST_STATE_READY);
                 gtk_button_set_icon_name(app->play_pause_button, "media-playback-start-symbolic");
@@ -214,10 +203,7 @@ void playback_shuffle_toggle(MmpApp* app) {
     if (app->shuffle_mode) {
         playback_rebuild_unplayed_pool(app);
     } else {
-        if (app->unplayed_pool) {
-            g_list_free(app->unplayed_pool);
-            app->unplayed_pool = NULL;
-        }
+        g_clear_pointer(&app->unplayed_pool, g_ptr_array_unref);
     }
 }
 
@@ -227,7 +213,9 @@ void playback_repeat_toggle(MmpApp* app) {
 
 void playback_play_track(MmpApp* app, GList* node) {
     if (node == NULL) return;
-    
+
+    const char* old_path = app->current_file_path;
+
     app->current_track_node = node;
     char* path = node->data;
     
@@ -240,15 +228,7 @@ void playback_play_track(MmpApp* app, GList* node) {
         g_object_set(app->playbin, "uri", uri, NULL);
         gst_element_set_state(app->playbin, GST_STATE_PLAYING);
         
-        // Try to find the song in the library to get immediate metadata
-        Song* found_song = NULL;
-        for (GList* l = app->library; l != NULL; l = l->next) {
-            Song* s = (Song*)l->data;
-            if (g_strcmp0(s->path, path) == 0) {
-                found_song = s;
-                break;
-            }
-        }
+        Song* found_song = g_hash_table_lookup(app->library_by_path, path);
 
         if (found_song) {
             char* label = g_strdup_printf("%s - %s", found_song->artist, found_song->title);
@@ -263,7 +243,7 @@ void playback_play_track(MmpApp* app, GList* node) {
         gtk_button_set_icon_name(app->play_pause_button, "media-playback-pause-symbolic");
         g_free(uri);
     }
-    ui_update_queue(app);
+    ui_update_now_playing(app, old_path);
 }
 
 static GList* playback_add_to_playlist_internal(MmpApp* app, const char* path, bool play_now, bool update_ui) {
@@ -273,7 +253,7 @@ static GList* playback_add_to_playlist_internal(MmpApp* app, const char* path, b
     GList* new_node = g_queue_peek_tail_link(app->playlist);
 
     if (app->shuffle_mode && app->unplayed_pool) {
-        app->unplayed_pool = g_list_append(app->unplayed_pool, new_node);
+        g_ptr_array_add(app->unplayed_pool, new_node);
     }
     
     if (play_now || app->current_track_node == NULL) {
@@ -300,10 +280,7 @@ void playback_add_songs_to_playlist(MmpApp* app, GList* songs) {
 
 void playback_open_file(MmpApp* app, const char* path) {
     // Clear playlist and play this file
-    if (app->unplayed_pool) {
-        g_list_free(app->unplayed_pool);
-        app->unplayed_pool = NULL;
-    }
+    g_clear_pointer(&app->unplayed_pool, g_ptr_array_unref);
 
     g_queue_foreach(app->playlist, (GFunc)g_free, NULL);
     g_queue_clear(app->playlist);
@@ -355,7 +332,7 @@ void playback_play_next(MmpApp* app, const char* path) {
     }
 
     if (app->shuffle_mode && app->unplayed_pool) {
-        app->unplayed_pool = g_list_append(app->unplayed_pool, new_node);
+        g_ptr_array_add(app->unplayed_pool, new_node);
     }
 
     ui_update_queue(app);
@@ -375,11 +352,12 @@ void playback_skip_next(MmpApp* app) {
 void playback_remove_from_playlist(MmpApp* app, GList* node) {
     if (node == NULL) return;
     
-    // Remove from unplayed pool if it's there
     if (app->unplayed_pool) {
-        GList* pool_link = g_list_find(app->unplayed_pool, node);
-        if (pool_link) {
-            app->unplayed_pool = g_list_delete_link(app->unplayed_pool, pool_link);
+        for (guint i = 0; i < app->unplayed_pool->len; i++) {
+            if (g_ptr_array_index(app->unplayed_pool, i) == node) {
+                g_ptr_array_remove_index_fast(app->unplayed_pool, i);
+                break;
+            }
         }
     }
     
@@ -401,10 +379,7 @@ void playback_remove_from_playlist(MmpApp* app, GList* node) {
 }
 
 void playback_clear_playlist(MmpApp* app) {
-    if (app->unplayed_pool) {
-        g_list_free(app->unplayed_pool);
-        app->unplayed_pool = NULL;
-    }
+    g_clear_pointer(&app->unplayed_pool, g_ptr_array_unref);
 
     gst_element_set_state(app->playbin, GST_STATE_READY);
     app->current_track_node = NULL;
