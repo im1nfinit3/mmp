@@ -192,10 +192,10 @@ static void show_song_context_menu(Song* song, double x, double y, GtkWidget* pa
 void song_row_secondary_click_cb(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {
     (void)user_data;
     if (n_press != 1) return;
-    GtkWidget* row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
-    Song* song = g_object_get_data(G_OBJECT(row), "song-data");
+    GtkWidget* widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    Song* song = g_object_get_data(G_OBJECT(widget), "song-data");
     if (song) {
-        show_song_context_menu(song, x, y, row);
+        show_song_context_menu(song, x, y, widget);
     }
 }
 
@@ -332,6 +332,19 @@ void song_row_activated_cb(GtkListBox* list, GtkListBoxRow* row, gpointer user_d
     Song* song = g_object_get_data(G_OBJECT(row), "song-data");
     if (song) {
         play_song(app, song);
+    }
+}
+
+void song_view_activate_cb(GtkListView* view, guint position, gpointer user_data) {
+    MmpApp* app = user_data;
+    GtkSelectionModel* sel = gtk_list_view_get_model(view);
+    GObject* obj = g_list_model_get_item(G_LIST_MODEL(sel), position);
+    if (obj) {
+        MmpSongItem* item = MMP_SONG_ITEM(obj);
+        if (item->song) {
+            play_song(app, item->song);
+        }
+        g_object_unref(obj);
     }
 }
 

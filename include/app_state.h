@@ -37,7 +37,8 @@ typedef struct {
     GtkButton* play_pause_button;
     GtkButton* shuffle_button;
     GtkButton* repeat_button;
-    GtkListBox* songs_list;
+    GtkListView* song_view;
+    GListStore* song_store;
     GtkListBox* albums_list;
     GtkListBox* artists_list;
     GtkListBox* queue_list;

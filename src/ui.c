@@ -7,6 +7,17 @@
 
 MmpApp* mmp_app = NULL;
 
+G_DEFINE_TYPE(MmpSongItem, mmp_song_item, G_TYPE_OBJECT)
+
+static void mmp_song_item_init(MmpSongItem* self) { (void)self; }
+static void mmp_song_item_class_init(MmpSongItemClass* klass) { (void)klass; }
+
+static MmpSongItem* mmp_song_item_new(Song* song) {
+    MmpSongItem* item = g_object_new(MMP_TYPE_SONG_ITEM, NULL);
+    item->song = song;
+    return item;
+}
+
 static void add_to_library_ui(MmpApp* app, Song* song) {
     // Add to Artists list if not already there
     bool artist_exists = false;
@@ -189,6 +200,73 @@ void free_song(Song* song) {
     g_free(song);
 }
 
+static void song_factory_setup(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    (void)factory; (void)user_data;
+
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(box, "song-row");
+
+    GtkWidget* title_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(title_label), 0);
+    gtk_widget_set_hexpand(title_label, TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
+    gtk_box_append(GTK_BOX(box), title_label);
+
+    GtkWidget* artist_label = gtk_label_new("");
+    gtk_widget_add_css_class(artist_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(artist_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(artist_label), 15);
+    gtk_box_append(GTK_BOX(box), artist_label);
+
+    GtkWidget* album_label = gtk_label_new("");
+    gtk_widget_add_css_class(album_label, "dim-label");
+    gtk_label_set_ellipsize(GTK_LABEL(album_label), PANGO_ELLIPSIZE_START);
+    gtk_label_set_max_width_chars(GTK_LABEL(album_label), 15);
+    gtk_box_append(GTK_BOX(box), album_label);
+
+    GtkWidget* duration_label = gtk_label_new("");
+    gtk_widget_add_css_class(duration_label, "dim-label");
+    gtk_widget_add_css_class(duration_label, "duration-label");
+    gtk_box_append(GTK_BOX(box), duration_label);
+
+    gtk_list_item_set_child(item, box);
+
+    GtkGesture* gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+    g_signal_connect(gesture, "released", G_CALLBACK(song_row_secondary_click_cb), NULL);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(gesture));
+}
+
+static void song_factory_bind(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    (void)factory; (void)user_data;
+
+    MmpSongItem* song_item = MMP_SONG_ITEM(gtk_list_item_get_item(item));
+    if (!song_item || !song_item->song) return;
+
+    Song* song = song_item->song;
+    GtkWidget* box = gtk_list_item_get_child(item);
+    if (!box) return;
+
+    g_object_set_data(G_OBJECT(box), "song-data", song);
+
+    GtkWidget* title_label = gtk_widget_get_first_child(box);
+    gtk_label_set_label(GTK_LABEL(title_label), song->title);
+
+    GtkWidget* artist_label = gtk_widget_get_next_sibling(title_label);
+    gtk_label_set_label(GTK_LABEL(artist_label), song->artist);
+
+    GtkWidget* album_label = gtk_widget_get_next_sibling(artist_label);
+    gtk_label_set_label(GTK_LABEL(album_label), song->album);
+
+    GtkWidget* duration_label = gtk_widget_get_next_sibling(album_label);
+    if (song->duration_str) {
+        gtk_label_set_label(GTK_LABEL(duration_label), song->duration_str);
+        gtk_widget_set_visible(duration_label, TRUE);
+    } else {
+        gtk_widget_set_visible(duration_label, FALSE);
+    }
+}
+
 static void free_song_filter(gpointer data) {
     SongFilter* filter = data;
     if (filter->notify && filter->user_data) {
@@ -295,7 +373,17 @@ GList* ui_get_filtered_songs(MmpApp* app) {
 }
 
 void ui_refresh_view(MmpApp* app) {
-    ui_refresh_view_list(app, app->songs_list, app->current_view_base_list, app->current_view_reverse);
+    if (!app->song_store) return;
+
+    g_list_store_remove_all(app->song_store);
+
+    GList* songs = ui_get_filtered_songs(app);
+    for (GList* l = songs; l; l = l->next) {
+        MmpSongItem* item = mmp_song_item_new(l->data);
+        g_list_store_append(app->song_store, G_OBJECT(item));
+        g_object_unref(item);
+    }
+    g_list_free(songs);
 }
 
 void ui_update_search_lowered_text(MmpApp* app, GtkSearchEntry* entry) {
@@ -363,21 +451,6 @@ void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend
     gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 }
 
-void ui_populate_songs(MmpApp* app, GList* songs, bool own_songs) {
-    if (!app->songs_list) return;
-
-    // Clear the list
-    GtkWidget* child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(app->songs_list))) != NULL) {
-        gtk_list_box_remove(app->songs_list, child);
-    }
-
-    // Populate
-    for (GList* l = songs; l != NULL; l = l->next) {
-        ui_add_song_to_list(app, app->songs_list, (Song*)l->data, false, own_songs);
-    }
-}
-
 static void add_song_to_ui(MmpApp* app, Song* song) {
     // If the library is the base list for the current view, refresh it
     if (app->current_view_base_list == app->library) {
@@ -402,24 +475,20 @@ static gboolean add_song_idle_cb(gpointer user_data) {
 
 static gboolean update_song_ui_idle_cb(gpointer user_data) {
     SongUpdateData* data = user_data;
-    GtkListBox* list = data->app->songs_list;
-    
-    if (list) {
-        GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(list));
-        while (child) {
-            Song* s = g_object_get_data(G_OBJECT(child), "song-data");
-            if (s && g_strcmp0(s->path, data->song->path) == 0) {
-                if (s != data->song) {
-                    g_free(s->title); s->title = g_strdup(data->song->title);
-                    g_free(s->artist); s->artist = g_strdup(data->song->artist);
-                    g_free(s->album); s->album = g_strdup(data->song->album);
-                    g_free(s->duration_str); s->duration_str = g_strdup(data->song->duration_str);
-                }
-                
-                GtkWidget* new_box = create_song_row_box(s);
-                gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(child), new_box);
+    GListStore* store = data->app->song_store;
+
+    if (store) {
+        guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
+        for (guint i = 0; i < n; i++) {
+            GObject* obj = g_list_model_get_item(G_LIST_MODEL(store), i);
+            MmpSongItem* item = MMP_SONG_ITEM(obj);
+            if (item && g_strcmp0(item->song->path, data->song->path) == 0) {
+                g_list_store_remove(store, i);
+                g_list_store_insert(store, i, obj);
+                g_object_unref(obj);
+                break;
             }
-            child = gtk_widget_get_next_sibling(child);
+            g_object_unref(obj);
         }
     }
     g_free(data);
@@ -807,8 +876,35 @@ void app_activate_cb(GtkApplication* app) {
     gtk_box_append(GTK_BOX(main_shell), GTK_WIDGET(mmp_app->content_stack));
 
     // Page: Songs
-    GtkWidget* songs_page = create_library_panel("Search songs", &mmp_app->songs_list, &mmp_app->songs_search_entry);
-    gtk_stack_add_titled(mmp_app->content_stack, songs_page, "songs-view", "Songs");
+    {
+        GtkWidget* page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class(page_box, "content-page");
+
+        GtkWidget* panel_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_set_vexpand(panel_box, TRUE);
+        gtk_widget_add_css_class(panel_box, "library-panel");
+        gtk_box_append(GTK_BOX(page_box), panel_box);
+
+        mmp_app->songs_search_entry = GTK_SEARCH_ENTRY(gtk_search_entry_new());
+        gtk_search_entry_set_placeholder_text(mmp_app->songs_search_entry, "Search songs");
+        gtk_box_append(GTK_BOX(panel_box), GTK_WIDGET(mmp_app->songs_search_entry));
+
+        GtkWidget* scrolled = gtk_scrolled_window_new();
+        gtk_widget_set_vexpand(scrolled, TRUE);
+        gtk_box_append(GTK_BOX(panel_box), scrolled);
+
+        mmp_app->song_store = g_list_store_new(MMP_TYPE_SONG_ITEM);
+        GtkSingleSelection* sel = gtk_single_selection_new(G_LIST_MODEL(mmp_app->song_store));
+        GtkListItemFactory* factory = gtk_signal_list_item_factory_new();
+        g_signal_connect(factory, "setup", G_CALLBACK(song_factory_setup), NULL);
+        g_signal_connect(factory, "bind", G_CALLBACK(song_factory_bind), NULL);
+        mmp_app->song_view = GTK_LIST_VIEW(gtk_list_view_new(GTK_SELECTION_MODEL(sel), factory));
+        gtk_widget_add_css_class(GTK_WIDGET(mmp_app->song_view), "library-list");
+        gtk_widget_add_css_class(GTK_WIDGET(mmp_app->song_view), "boxed-list");
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(mmp_app->song_view));
+
+        gtk_stack_add_titled(mmp_app->content_stack, page_box, "songs-view", "Songs");
+    }
 
     // Page: Albums
     GtkWidget* albums_page = create_library_panel("Search albums", &mmp_app->albums_list, NULL);
@@ -860,7 +956,7 @@ void app_activate_cb(GtkApplication* app) {
 
     gtk_list_box_set_filter_func(mmp_app->albums_list, filter_albums_cb, mmp_app, NULL);
     g_signal_connect(mmp_app->songs_search_entry, "search-changed", G_CALLBACK(search_changed_cb), mmp_app);
-    g_signal_connect(mmp_app->songs_list, "row-activated", G_CALLBACK(song_row_activated_cb), mmp_app);
+    g_signal_connect(mmp_app->song_view, "activate", G_CALLBACK(song_view_activate_cb), mmp_app);
     g_signal_connect(mmp_app->albums_list, "row-activated", G_CALLBACK(album_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->artists_list, "row-activated", G_CALLBACK(artist_row_activated_cb), mmp_app);
     g_signal_connect(mmp_app->queue_list, "row-activated", G_CALLBACK(queue_row_activated_cb), mmp_app);

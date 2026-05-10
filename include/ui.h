@@ -4,6 +4,14 @@
 #include <gtk/gtk.h>
 #include "app_state.h"
 
+#define MMP_TYPE_SONG_ITEM (mmp_song_item_get_type())
+G_DECLARE_FINAL_TYPE(MmpSongItem, mmp_song_item, MMP, SONG_ITEM, GObject)
+
+struct _MmpSongItem {
+    GObject parent_instance;
+    Song* song;
+};
+
 void app_activate_cb(GtkApplication* app);
 void app_open_cb(GtkApplication* app, GFile** files, int n_files, const char* hint, gpointer user_data);
 void ui_update_queue(MmpApp* app);
@@ -20,7 +28,6 @@ bool album_filter_func(Song* song, gpointer user_data);
 GtkWidget* create_song_row_box(Song* song);
 void free_song(Song* song);
 void ui_add_song_to_list(MmpApp* app, GtkListBox* list, Song* song, bool prepend, bool own_song);
-void ui_populate_songs(MmpApp* app, GList* songs, bool own_songs);
 void ui_update_search_lowered_text(MmpApp* app, GtkSearchEntry* entry);
 
 #endif // MMP_UI_H
