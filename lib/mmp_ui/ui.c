@@ -64,12 +64,11 @@ void ui_update_queue(MmpUI* ui) {
     ui->queue_fallback_songs = NULL;
     g_list_store_remove_all(ui->queue_store);
 
-    GQueue* queue = mmp_library_get_queue(ui->library);
-    if (!queue) return;
+    GList* paths = mmp_library_get_queue_path_list(ui->library);
+    if (!paths) return;
 
-    GList* iter = queue->head;
-    while (iter) {
-        const char* path = iter->data;
+    for (GList* l = paths; l; l = l->next) {
+        const char* path = l->data;
 
         Song* found_song = mmp_library_find_song(ui->library, path);
 
@@ -92,8 +91,9 @@ void ui_update_queue(MmpUI* ui) {
 
         g_list_store_append(ui->queue_store, G_OBJECT(item));
         g_object_unref(item);
-        iter = iter->next;
     }
+
+    g_list_free(paths);
 }
 
 gboolean queue_drop_cb(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
@@ -275,14 +275,12 @@ static void queue_factory_bind(GtkSignalListItemFactory* factory, GtkListItem* i
     if (!box) return;
 
     guint pos = gtk_list_item_get_position(item);
-    GList* node = g_queue_peek_nth_link(mmp_library_get_queue(ui->library), pos);
 
     g_object_set_data(G_OBJECT(box), "song-data", song);
-    g_object_set_data(G_OBJECT(box), "playlist-node", node);
+    g_object_set_data(G_OBJECT(box), "queue-position", GUINT_TO_POINTER(pos + 1));
 
     GtkWidget* indicator = gtk_widget_get_first_child(box);
-    GList* cur_node = mmp_library_get_current_node(ui->library);
-    if (node == cur_node) {
+    if (mmp_library_is_playing_queue_position(ui->library, pos)) {
         gtk_image_set_from_icon_name(GTK_IMAGE(indicator), "audio-volume-medium-symbolic");
     } else {
         gtk_image_clear(GTK_IMAGE(indicator));

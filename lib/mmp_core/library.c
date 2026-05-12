@@ -19,6 +19,7 @@ struct _MmpLibrary {
 
     GQueue        *queue;
     GList         *current_track_node;
+    guint          current_track_position;
     char          *current_file_path;
 
     bool           shuffle_mode;
@@ -82,6 +83,17 @@ static void rebuild_unplayed_pool(MmpLibrary *lib)
     }
 }
 
+static void set_current_track_node(MmpLibrary *lib, GList *node)
+{
+    lib->current_track_node = node;
+    if (node) {
+        gint idx = g_queue_link_index(lib->queue, node);
+        lib->current_track_position = (idx >= 0) ? (guint)idx : G_MAXUINT;
+    } else {
+        lib->current_track_position = G_MAXUINT;
+    }
+}
+
 static GList *find_queue_node(MmpLibrary *lib, const char *path)
 {
     for (GList *l = lib->queue->head; l != NULL; l = l->next) {
@@ -125,7 +137,7 @@ static void play_track_node(MmpLibrary *lib, GList *node)
 {
     if (!node) return;
 
-    lib->current_track_node = node;
+    set_current_track_node(lib, node);
     g_free(lib->current_file_path);
     lib->current_file_path = g_strdup((const char *)node->data);
 
@@ -229,6 +241,7 @@ static void mmp_library_init(MmpLibrary *lib)
     lib->shuffle_mode = false;
     lib->repeat_mode = REPEAT_OFF;
     lib->unplayed_pool = NULL;
+    lib->current_track_position = G_MAXUINT;
 
     GError *err = NULL;
     lib->discoverer = gst_discoverer_new(2 * GST_SECOND, &err);
@@ -444,7 +457,7 @@ void mmp_library_play_from_library(MmpLibrary *lib, const char *path)
     rebuild_unplayed_pool(lib);
 }
 
-void mmp_library_remove_from_queue(MmpLibrary *lib, GList *node)
+static void remove_queue_node_internal(MmpLibrary *lib, GList *node)
 {
     g_return_if_fail(MMP_IS_LIBRARY(lib));
     if (!node) return;
@@ -464,7 +477,7 @@ void mmp_library_remove_from_queue(MmpLibrary *lib, GList *node)
         play_track_node(lib, node->next);
     else if (is_current) {
         mmp_playback_stop(lib->playback);
-        lib->current_track_node = NULL;
+        set_current_track_node(lib, NULL);
     }
 
     g_free(node->data);
@@ -479,7 +492,7 @@ void mmp_library_clear_queue(MmpLibrary *lib)
     g_clear_pointer(&lib->unplayed_pool, g_ptr_array_unref);
     mmp_playback_stop(lib->playback);
 
-    lib->current_track_node = NULL;
+    set_current_track_node(lib, NULL);
     g_free(lib->current_file_path);
     lib->current_file_path = NULL;
 
@@ -535,16 +548,68 @@ void mmp_library_skip_prev(MmpLibrary *lib)
         play_track_node(lib, lib->current_track_node->prev);
 }
 
-GQueue *mmp_library_get_queue(MmpLibrary *lib)
+guint mmp_library_get_queue_length(MmpLibrary *lib)
 {
-    g_return_val_if_fail(MMP_IS_LIBRARY(lib), NULL);
-    return lib->queue;
+    g_return_val_if_fail(MMP_IS_LIBRARY(lib), 0);
+    return lib->queue ? lib->queue->length : 0;
 }
 
-GList *mmp_library_get_current_node(MmpLibrary *lib)
+const char *mmp_library_get_queue_path_at(MmpLibrary *lib, guint index)
 {
     g_return_val_if_fail(MMP_IS_LIBRARY(lib), NULL);
-    return lib->current_track_node;
+    GList *node = g_queue_peek_nth_link(lib->queue, index);
+    return node ? (const char *)node->data : NULL;
+}
+
+bool mmp_library_is_playing_queue_position(MmpLibrary *lib, guint index)
+{
+    g_return_val_if_fail(MMP_IS_LIBRARY(lib), false);
+    return lib->current_track_position == index;
+}
+
+void mmp_library_reorder_queue(MmpLibrary *lib, guint from_index, guint to_index)
+{
+    g_return_if_fail(MMP_IS_LIBRARY(lib));
+    if (from_index == to_index) return;
+
+    GList *node = g_queue_peek_nth_link(lib->queue, from_index);
+    if (!node) return;
+
+    char *path = node->data;
+    bool was_current = (node == lib->current_track_node);
+
+    g_queue_delete_link(lib->queue, node);
+
+    guint adjusted_to = (to_index > from_index) ? to_index - 1 : to_index;
+    GList *target = g_queue_peek_nth_link(lib->queue, adjusted_to);
+
+    if (target)
+        g_queue_insert_before(lib->queue, target, path);
+    else
+        g_queue_push_tail(lib->queue, path);
+
+    if (was_current)
+        set_current_track_node(lib, target ? target->prev : g_queue_peek_tail_link(lib->queue));
+
+    rebuild_unplayed_pool(lib);
+    g_signal_emit(lib, lib_signals[SIGNAL_QUEUE_CHANGED], 0);
+}
+
+GList *mmp_library_get_queue_path_list(MmpLibrary *lib)
+{
+    g_return_val_if_fail(MMP_IS_LIBRARY(lib), NULL);
+    GList *result = NULL;
+    for (GList *l = lib->queue->head; l; l = l->next)
+        result = g_list_prepend(result, l->data);
+    return g_list_reverse(result);
+}
+
+void mmp_library_remove_from_queue(MmpLibrary *lib, guint index)
+{
+    g_return_if_fail(MMP_IS_LIBRARY(lib));
+    GList *node = g_queue_peek_nth_link(lib->queue, index);
+    if (node)
+        remove_queue_node_internal(lib, node);
 }
 
 const char *mmp_library_get_current_path(MmpLibrary *lib)
@@ -821,11 +886,12 @@ static void on_scan_complete(GObject *source, GAsyncResult *res, gpointer user_d
     g_hash_table_iter_init(&iter, result->songs_to_add);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         Song *song = value;
-        if (!g_hash_table_lookup(lib->songs_by_path, song->path)) {
+        Song *existing = g_hash_table_lookup(lib->songs_by_path, song->path);
+        if (!existing) {
             g_hash_table_insert(lib->songs_by_path, song->path, song);
             lib->songs = g_list_append(lib->songs, song);
             g_signal_emit(lib, lib_signals[SIGNAL_SONG_ADDED], 0, song);
-        } else {
+        } else if (song != existing) {
             free_song(song);
         }
     }

@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-static GList* drag_source_node = NULL;
+static guint drag_source_pos = G_MAXUINT;
 
 typedef struct {
     Song          *song;
@@ -10,7 +10,7 @@ typedef struct {
 } SongActionData;
 
 typedef struct {
-    GList         *node;
+    guint          position;
     MmpUI         *ui;
 } QueueActionData;
 
@@ -27,23 +27,18 @@ static MmpUI* get_ui_from_widget(GtkWidget *widget) {
 void queue_drag_begin_cb(GtkDragSource *source, GdkDrag *drag, gpointer user_data) {
     (void)drag; (void)user_data;
     GtkWidget *row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source));
-    drag_source_node = g_object_get_data(G_OBJECT(row), "playlist-node");
+    drag_source_pos = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(row), "queue-position")) - 1;
 }
 
 gboolean queue_drop_cb(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
     (void)value; (void)x; (void)y; (void)user_data;
     GtkWidget *row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
     MmpUI *ui = get_ui_from_widget(row);
-    GList *target_node = g_object_get_data(G_OBJECT(row), "playlist-node");
+    guint target_pos = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(row), "queue-position")) - 1;
 
-    if (drag_source_node && target_node && drag_source_node != target_node) {
-        char *path = drag_source_node->data;
-        GQueue *queue = mmp_library_get_queue(ui->library);
-        g_queue_delete_link(queue, drag_source_node);
-        g_queue_insert_before(queue, target_node, path);
-
-        drag_source_node = NULL;
-        ui_update_queue(ui);
+    if (drag_source_pos != G_MAXUINT && drag_source_pos != target_pos) {
+        mmp_library_reorder_queue(ui->library, drag_source_pos, target_pos);
+        drag_source_pos = G_MAXUINT;
         return TRUE;
     }
     return FALSE;
@@ -235,15 +230,15 @@ void song_row_secondary_click_cb(GtkGestureClick *gesture, int n_press, double x
 static void queue_play_now_action_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
     QueueActionData *data = user_data;
-    GList *node = data->node;
-    mmp_library_play_from_library(data->ui->library, (const char *)node->data);
+    const char *path = mmp_library_get_queue_path_at(data->ui->library, data->position);
+    if (path)
+        mmp_library_play_from_library(data->ui->library, path);
 }
 
 static void queue_remove_action_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
     QueueActionData *data = user_data;
-    GList *node = data->node;
-    mmp_library_remove_from_queue(data->ui->library, node);
+    mmp_library_remove_from_queue(data->ui->library, data->position);
 }
 
 static void queue_clear_action_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -254,9 +249,9 @@ static void queue_clear_action_cb(GSimpleAction *action, GVariant *parameter, gp
 
 static void queue_save_as_playlist_action_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
-static void show_queue_context_menu(MmpUI *ui, GList *node, double x, double y, GtkWidget *parent_row) {
+static void show_queue_context_menu(MmpUI *ui, guint position, double x, double y, GtkWidget *parent_row) {
     QueueActionData *action_data = g_new0(QueueActionData, 1);
-    action_data->node = node;
+    action_data->position = position;
     action_data->ui = ui;
 
     GSimpleActionGroup *action_group = g_simple_action_group_new();
@@ -300,10 +295,10 @@ void queue_row_secondary_click_cb(GtkGestureClick *gesture, int n_press, double 
     (void)user_data;
     if (n_press != 1) return;
     GtkWidget *row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
-    GList *node = g_object_get_data(G_OBJECT(row), "playlist-node");
-    if (node) {
+    gpointer pos_data = g_object_get_data(G_OBJECT(row), "queue-position");
+    if (pos_data != NULL) {
         MmpUI *ui = get_ui_from_widget(row);
-        if (ui) show_queue_context_menu(ui, node, x, y, row);
+        if (ui) show_queue_context_menu(ui, GPOINTER_TO_UINT(pos_data) - 1, x, y, row);
     }
 }
 
@@ -395,10 +390,9 @@ void song_view_activate_cb(GtkListView *view, guint position, gpointer user_data
 
 void queue_view_activate_cb(GtkListView *view, guint position, gpointer user_data) {
     MmpUI *ui = user_data;
-    GList *node = g_queue_peek_nth_link(mmp_library_get_queue(ui->library), position);
-    if (node) {
-        mmp_library_play_from_library(ui->library, (const char *)node->data);
-    }
+    const char *path = mmp_library_get_queue_path_at(ui->library, position);
+    if (path)
+        mmp_library_play_from_library(ui->library, path);
 }
 
 void volume_controls_enter_cb(
@@ -677,13 +671,13 @@ static void on_save_queue_as_playlist_done(const char *name, gpointer user_data)
     int new_id;
     if (!mmp_library_create_playlist(ui->library, name, &new_id)) return;
 
-    GQueue *queue = mmp_library_get_queue(ui->library);
-    for (GList *l = queue->head; l != NULL; l = l->next) {
+    GList *paths = mmp_library_get_queue_path_list(ui->library);
+    for (GList *l = paths; l != NULL; l = l->next) {
         Song *song = mmp_library_find_song(ui->library, (const char *)l->data);
-        if (song) {
+        if (song)
             mmp_library_add_song_to_playlist(ui->library, new_id, song);
-        }
     }
+    g_list_free(paths);
 
     ui_update_playlists(ui);
 }
@@ -781,7 +775,7 @@ gboolean on_drop_cb(GtkDropTarget *target, const GValue *value, double x, double
     if (G_VALUE_HOLDS(value, G_TYPE_FILE)) {
         GFile *file = g_value_get_object(value);
         char *path = g_file_get_path(file);
-        bool play_now = (mmp_library_get_current_node(ui->library) == NULL);
+        bool play_now = (mmp_library_get_queue_length(ui->library) == 0);
         mmp_library_add_to_queue(ui->library, path, play_now);
         g_free(path);
         return TRUE;

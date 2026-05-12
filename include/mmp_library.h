@@ -33,14 +33,17 @@ void          mmp_library_add_to_queue      (MmpLibrary *lib, const char *path, 
 void          mmp_library_add_songs_to_queue(MmpLibrary *lib, GList *songs);
 void          mmp_library_open_files        (MmpLibrary *lib, GFile **files, int n);
 void          mmp_library_play_from_library (MmpLibrary *lib, const char *path);
-void          mmp_library_remove_from_queue (MmpLibrary *lib, GList *node);
+void          mmp_library_remove_from_queue (MmpLibrary *lib, guint index);
 void          mmp_library_clear_queue       (MmpLibrary *lib);
 void          mmp_library_play_next         (MmpLibrary *lib, const char *path);
 void          mmp_library_skip_next         (MmpLibrary *lib);
 void          mmp_library_skip_prev         (MmpLibrary *lib);
-GQueue       *mmp_library_get_queue         (MmpLibrary *lib);
-GList        *mmp_library_get_current_node  (MmpLibrary *lib);
-const char   *mmp_library_get_current_path  (MmpLibrary *lib);
+guint         mmp_library_get_queue_length          (MmpLibrary *lib);
+const char   *mmp_library_get_queue_path_at         (MmpLibrary *lib, guint index);
+bool          mmp_library_is_playing_queue_position (MmpLibrary *lib, guint index);
+void          mmp_library_reorder_queue             (MmpLibrary *lib, guint from_index, guint to_index);
+GList        *mmp_library_get_queue_path_list       (MmpLibrary *lib);
+const char   *mmp_library_get_current_path          (MmpLibrary *lib);
 
 void          mmp_library_toggle_shuffle(MmpLibrary *lib);
 void          mmp_library_toggle_repeat (MmpLibrary *lib);
