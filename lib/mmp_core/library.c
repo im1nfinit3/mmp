@@ -25,8 +25,6 @@ struct _MmpLibrary {
     RepeatMode     repeat_mode;
     GPtrArray     *unplayed_pool;
 
-    int            current_playlist_id;
-
     MmpPlayback   *playback;
 };
 
@@ -231,7 +229,6 @@ static void mmp_library_init(MmpLibrary *lib)
     lib->shuffle_mode = false;
     lib->repeat_mode = REPEAT_OFF;
     lib->unplayed_pool = NULL;
-    lib->current_playlist_id = 0;
 
     GError *err = NULL;
     lib->discoverer = gst_discoverer_new(2 * GST_SECOND, &err);
@@ -327,12 +324,6 @@ void mmp_library_attach_playback(MmpLibrary *lib, MmpPlayback *pb)
     g_signal_connect(pb, "state-changed", G_CALLBACK(on_pb_state_changed), lib);
 }
 
-MmpPlayback *mmp_library_get_playback(MmpLibrary *lib)
-{
-    g_return_val_if_fail(MMP_IS_LIBRARY(lib), NULL);
-    return lib->playback;
-}
-
 /* ======================================================================
  * Public API — library
  * ====================================================================== */
@@ -342,15 +333,11 @@ void mmp_library_load_cached(MmpLibrary *lib)
     g_return_if_fail(MMP_IS_LIBRARY(lib));
 
     GList *cached = db_get_all_songs(lib->library_db);
-    GList *reversed = NULL;
     for (GList *l = cached; l != NULL; l = l->next) {
         Song *s = l->data;
-        reversed = g_list_prepend(reversed, s);
         g_hash_table_insert(lib->songs_by_path, s->path, s);
     }
-    reversed = g_list_reverse(reversed);
-    lib->songs = g_list_concat(lib->songs, reversed);
-    g_list_free(cached);
+    lib->songs = g_list_concat(lib->songs, cached);
 
     for (GList *l = lib->songs; l != NULL; l = l->next)
         g_signal_emit(lib, lib_signals[SIGNAL_SONG_ADDED], 0, (const Song *)l->data);
@@ -368,7 +355,7 @@ GList *mmp_library_get_all_songs(MmpLibrary *lib)
     return lib->songs;
 }
 
-void mmp_library_extract_metadata(MmpLibrary *lib, Song *song)
+static void mmp_library_extract_metadata(MmpLibrary *lib, Song *song)
 {
     g_return_if_fail(MMP_IS_LIBRARY(lib));
     if (!lib->discoverer || !song) return;
@@ -776,12 +763,11 @@ static void scan_directory_recursive(MmpLibrary *lib, const char *path, GHashTab
 typedef struct {
     MmpLibrary *lib;
     GHashTable *songs_to_add;
-    GList      *updated_songs;
 } ScanResult;
 
 typedef struct {
     MmpLibrary *lib;
-    const char *music_dir;
+    char       *music_dir;
 } ScanTaskData;
 
 static void scan_directory_thread(GTask *task, gpointer source_object,
@@ -804,6 +790,7 @@ static void scan_directory_thread(GTask *task, gpointer source_object,
     const char *music_dir = std->music_dir;
     if (music_dir)
         scan_directory_recursive(lib, music_dir, existing_paths);
+    g_free(std->music_dir);
 
     GHashTableIter iter;
     gpointer key, value;
@@ -838,8 +825,6 @@ static void on_scan_complete(GObject *source, GAsyncResult *res, gpointer user_d
             g_hash_table_insert(lib->songs_by_path, song->path, song);
             lib->songs = g_list_append(lib->songs, song);
             g_signal_emit(lib, lib_signals[SIGNAL_SONG_ADDED], 0, song);
-        } else if (song != g_hash_table_lookup(lib->songs_by_path, song->path)) {
-            g_signal_emit(lib, lib_signals[SIGNAL_SONG_UPDATED], 0, song);
         }
     }
 
@@ -853,7 +838,7 @@ void mmp_library_scan_async(MmpLibrary *lib, const char *music_dir)
 
     ScanTaskData *std = g_new(ScanTaskData, 1);
     std->lib = lib;
-    std->music_dir = music_dir;
+    std->music_dir = g_strdup(music_dir);
 
     GTask *task = g_task_new(NULL, NULL, on_scan_complete, NULL);
     g_task_set_task_data(task, std, g_free);

@@ -21,7 +21,6 @@ void mmp_playback_seek         (MmpPlayback *pb, double seconds);
 void mmp_playback_set_volume   (MmpPlayback *pb, double volume);
 void mmp_playback_set_mute     (MmpPlayback *pb, bool mute);
 
-bool   mmp_playback_is_playing  (MmpPlayback *pb);
 double mmp_playback_get_position(MmpPlayback *pb);
 double mmp_playback_get_duration(MmpPlayback *pb);
 

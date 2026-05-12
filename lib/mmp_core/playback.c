@@ -153,14 +153,6 @@ void mmp_playback_set_mute(MmpPlayback *pb, bool mute)
     g_object_set(pb->playbin, "mute", mute, NULL);
 }
 
-bool mmp_playback_is_playing(MmpPlayback *pb)
-{
-    g_return_val_if_fail(MMP_IS_PLAYBACK(pb), false);
-    GstState state;
-    gst_element_get_state(pb->playbin, &state, NULL, 0);
-    return state == GST_STATE_PLAYING;
-}
-
 double mmp_playback_get_position(MmpPlayback *pb)
 {
     g_return_val_if_fail(MMP_IS_PLAYBACK(pb), 0.0);

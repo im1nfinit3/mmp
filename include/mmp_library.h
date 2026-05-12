@@ -23,14 +23,11 @@ G_DECLARE_FINAL_TYPE(MmpLibrary, mmp_library, MMP, LIBRARY, GObject)
 
 MmpLibrary   *mmp_library_new(MmpPlayback *pb);
 void          mmp_library_attach_playback(MmpLibrary *lib, MmpPlayback *pb);
-MmpPlayback  *mmp_library_get_playback(MmpLibrary *lib);
 
 void          mmp_library_load_cached(MmpLibrary *lib);
 void          mmp_library_scan_async(MmpLibrary *lib, const char *music_dir);
 Song         *mmp_library_find_song(MmpLibrary *lib, const char *path);
 GList        *mmp_library_get_all_songs(MmpLibrary *lib);
-
-void          mmp_library_extract_metadata(MmpLibrary *lib, Song *song);
 
 void          mmp_library_add_to_queue      (MmpLibrary *lib, const char *path, bool play_now);
 void          mmp_library_add_songs_to_queue(MmpLibrary *lib, GList *songs);

@@ -125,10 +125,6 @@ gboolean on_drop_cb(GtkDropTarget* target, const GValue* value, double x, double
 
 typedef struct {
     GtkStack* stack;
-    GtkWidget* recently_added_row;
-    GtkWidget* albums_row;
-    GtkWidget* artists_row;
-    GtkWidget* songs_row;
 } LibraryNavRows;
 
 static void song_factory_setup(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
@@ -917,10 +913,6 @@ MmpUI* mmp_ui_new(GtkApplication* app, MmpLibrary* lib, MmpPlayback* pb) {
 
     LibraryNavRows* library_nav_rows = g_new(LibraryNavRows, 1);
     library_nav_rows->stack = ui->content_stack;
-    library_nav_rows->recently_added_row = GTK_WIDGET(nav_recently_added_row);
-    library_nav_rows->albums_row = GTK_WIDGET(nav_albums_row);
-    library_nav_rows->artists_row = GTK_WIDGET(nav_artists_row);
-    library_nav_rows->songs_row = GTK_WIDGET(nav_songs_row);
 
     g_signal_connect_data(ui->navigation_list, "row-selected", G_CALLBACK(navigation_row_selected_cb), library_nav_rows, (GClosureNotify)g_free, 0);
 

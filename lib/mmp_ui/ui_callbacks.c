@@ -15,11 +15,7 @@ typedef struct {
 } QueueActionData;
 
 typedef struct {
-    GtkStack      *stack;
-    GtkWidget     *recently_added_row;
-    GtkWidget     *albums_row;
-    GtkWidget     *artists_row;
-    GtkWidget     *songs_row;
+    GtkStack *stack;
 } LibraryNavRows;
 
 static MmpUI* get_ui_from_widget(GtkWidget *widget) {
