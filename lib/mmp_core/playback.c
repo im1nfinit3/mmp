@@ -86,15 +86,15 @@ static void mmp_playback_class_init(MmpPlaybackClass *klass)
         0, NULL, NULL, g_cclosure_marshal_VOID__VOID, G_TYPE_NONE, 0);
     signals[SIGNAL_TAG_RECEIVED] = g_signal_new(
         "tag-received", MMP_TYPE_PLAYBACK, G_SIGNAL_RUN_LAST,
-        0, NULL, NULL, g_cclosure_marshal_VOID__STRING, G_TYPE_NONE, 2,
+        0, NULL, NULL, NULL, G_TYPE_NONE, 2,
         G_TYPE_STRING, G_TYPE_STRING);
     signals[SIGNAL_ERROR] = g_signal_new(
         "error", MMP_TYPE_PLAYBACK, G_SIGNAL_RUN_LAST,
-        0, NULL, NULL, g_cclosure_marshal_VOID__STRING, G_TYPE_NONE, 1,
+        0, NULL, NULL, NULL, G_TYPE_NONE, 1,
         G_TYPE_STRING);
     signals[SIGNAL_STATE_CHANGED] = g_signal_new(
         "state-changed", MMP_TYPE_PLAYBACK, G_SIGNAL_RUN_LAST,
-        0, NULL, NULL, g_cclosure_marshal_VOID__BOOLEAN, G_TYPE_NONE, 1,
+        0, NULL, NULL, NULL, G_TYPE_NONE, 1,
         G_TYPE_BOOLEAN);
 }
 
