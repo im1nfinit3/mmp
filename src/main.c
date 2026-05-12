@@ -19,8 +19,9 @@ static void on_activate(GtkApplication *app, gpointer user_data)
     mmp_ui_connect_library(g_ui, lib);
 
     mmp_library_load_cached(lib);
-    mmp_library_scan_async(lib,
-        g_get_user_special_dir(G_USER_DIRECTORY_MUSIC));
+    const char *music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);
+    mmp_library_scan_async(lib, music_dir);
+    g_free((gpointer)music_dir);
 }
 
 static void on_open(GtkApplication *app, GFile **files, int n_files,

@@ -825,6 +825,8 @@ static void on_scan_complete(GObject *source, GAsyncResult *res, gpointer user_d
             g_hash_table_insert(lib->songs_by_path, song->path, song);
             lib->songs = g_list_append(lib->songs, song);
             g_signal_emit(lib, lib_signals[SIGNAL_SONG_ADDED], 0, song);
+        } else {
+            free_song(song);
         }
     }
 
