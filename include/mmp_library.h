@@ -7,6 +7,8 @@
 
 typedef struct _MmpPlayback MmpPlayback;
 
+G_BEGIN_DECLS
+
 Song  *mmp_song_copy(const Song *song);
 void   free_song(Song *song);
 #define MMP_TYPE_SONG (mmp_song_get_type())
@@ -58,5 +60,7 @@ bool          mmp_library_rename_playlist           (MmpLibrary *lib, int playli
 bool          mmp_library_add_song_to_playlist      (MmpLibrary *lib, int playlist_id, Song *song);
 bool          mmp_library_remove_song_from_playlist (MmpLibrary *lib, int playlist_id, const char *path);
 void          mmp_library_load_playlist             (MmpLibrary *lib, int playlist_id, const char *start_path);
+
+G_END_DECLS
 
 #endif

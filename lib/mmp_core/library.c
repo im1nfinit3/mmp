@@ -158,7 +158,7 @@ static void add_to_queue_internal(MmpLibrary *lib, const char *path, bool play_n
     if (lib->shuffle_mode && lib->unplayed_pool)
         g_ptr_array_add(lib->unplayed_pool, new_node);
 
-    if (play_now || lib->current_track_node == NULL)
+    if (play_now)
         play_track_node(lib, new_node);
     else if (emit_signal)
         g_signal_emit(lib, lib_signals[SIGNAL_QUEUE_CHANGED], 0);
@@ -472,9 +472,10 @@ static void remove_queue_node_internal(MmpLibrary *lib, GList *node)
     }
 
     bool is_current = (node == lib->current_track_node);
+    GList *next_node = is_current ? node->next : NULL;
 
-    if (is_current && node->next)
-        play_track_node(lib, node->next);
+    if (is_current && next_node)
+        play_track_node(lib, next_node);
     else if (is_current) {
         mmp_playback_stop(lib->playback);
         set_current_track_node(lib, NULL);
@@ -482,6 +483,10 @@ static void remove_queue_node_internal(MmpLibrary *lib, GList *node)
 
     g_free(node->data);
     g_queue_delete_link(lib->queue, node);
+
+    if (is_current && next_node)
+        rebuild_unplayed_pool(lib);
+
     g_signal_emit(lib, lib_signals[SIGNAL_QUEUE_CHANGED], 0);
 }
 
@@ -598,10 +603,7 @@ void mmp_library_reorder_queue(MmpLibrary *lib, guint from_index, guint to_index
 GList *mmp_library_get_queue_path_list(MmpLibrary *lib)
 {
     g_return_val_if_fail(MMP_IS_LIBRARY(lib), NULL);
-    GList *result = NULL;
-    for (GList *l = lib->queue->head; l; l = l->next)
-        result = g_list_prepend(result, l->data);
-    return g_list_reverse(result);
+    return g_list_copy(lib->queue->head);
 }
 
 void mmp_library_remove_from_queue(MmpLibrary *lib, guint index)
@@ -833,7 +835,16 @@ typedef struct {
 typedef struct {
     MmpLibrary *lib;
     char       *music_dir;
+    GHashTable *existing_paths;
 } ScanTaskData;
+
+static void scan_task_data_free(gpointer data)
+{
+    ScanTaskData *std = data;
+    if (std->existing_paths)
+        g_hash_table_destroy(std->existing_paths);
+    g_free(data);
+}
 
 static void scan_directory_thread(GTask *task, gpointer source_object,
                                    gpointer task_data, GCancellable *cancellable)
@@ -846,11 +857,7 @@ static void scan_directory_thread(GTask *task, gpointer source_object,
     result->lib = lib;
     result->songs_to_add = g_hash_table_new(g_str_hash, g_str_equal);
 
-    GHashTable *existing_paths = g_hash_table_new(g_str_hash, g_str_equal);
-    for (GList *l = lib->songs; l != NULL; l = l->next) {
-        Song *s = l->data;
-        g_hash_table_insert(existing_paths, s->path, s);
-    }
+    GHashTable *existing_paths = std->existing_paths;
 
     const char *music_dir = std->music_dir;
     if (music_dir)
@@ -867,6 +874,7 @@ static void scan_directory_thread(GTask *task, gpointer source_object,
     }
 
     g_hash_table_destroy(existing_paths);
+    std->existing_paths = NULL;
 
     g_task_return_pointer(task, result, NULL);
 }
@@ -908,8 +916,14 @@ void mmp_library_scan_async(MmpLibrary *lib, const char *music_dir)
     std->lib = lib;
     std->music_dir = g_strdup(music_dir);
 
+    std->existing_paths = g_hash_table_new(g_str_hash, g_str_equal);
+    for (GList *l = lib->songs; l != NULL; l = l->next) {
+        Song *s = l->data;
+        g_hash_table_insert(std->existing_paths, s->path, s);
+    }
+
     GTask *task = g_task_new(NULL, NULL, on_scan_complete, NULL);
-    g_task_set_task_data(task, std, g_free);
+    g_task_set_task_data(task, std, scan_task_data_free);
     g_task_run_in_thread(task, scan_directory_thread);
     g_object_unref(task);
 }

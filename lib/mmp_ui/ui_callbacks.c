@@ -518,7 +518,6 @@ static void on_dialog_ok_clicked(GtkButton *btn, gpointer d) {
     DialogData *dd = (DialogData *)d;
     dd->callback(gtk_editable_get_text(GTK_EDITABLE(dd->entry)), dd->user_data);
     gtk_window_destroy(GTK_WINDOW(dd->dialog));
-    g_free(dd);
 }
 
 static void show_entry_dialog(GtkWindow *parent, const char *title, const char *initial_text, EntryCallback callback, gpointer user_data) {
@@ -553,6 +552,8 @@ static void show_entry_dialog(GtkWindow *parent, const char *title, const char *
     data->entry = entry;
     data->callback = callback;
     data->user_data = user_data;
+
+    g_object_set_data_full(G_OBJECT(dialog), "dialog-data", data, g_free);
 
     g_signal_connect(ok_button, "clicked", G_CALLBACK(on_dialog_ok_clicked), data);
     g_signal_connect(entry, "activate", G_CALLBACK(on_dialog_ok_clicked), data);

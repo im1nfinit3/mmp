@@ -52,6 +52,9 @@ struct _MmpUI {
 
     char           *last_playing_path;
 
+    GHashTable     *artists_set;
+    GHashTable     *albums_set;
+
     bool            volume_muted;
 };
 

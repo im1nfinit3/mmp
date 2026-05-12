@@ -13,19 +13,8 @@ static MmpSongItem* mmp_song_item_new(Song* song) {
 }
 
 static void add_to_library_ui(MmpUI* ui, Song* song) {
-    bool artist_exists = false;
-    GtkWidget* artist_child = gtk_widget_get_first_child(GTK_WIDGET(ui->artists_list));
-    while (artist_child) {
-        GtkWidget* label = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(artist_child));
-        if (GTK_IS_BOX(label)) label = gtk_widget_get_first_child(label);
-        if (g_strcmp0(gtk_label_get_label(GTK_LABEL(label)), song->artist) == 0) {
-            artist_exists = true;
-            break;
-        }
-        artist_child = gtk_widget_get_next_sibling(artist_child);
-    }
-
-    if (!artist_exists) {
+    if (!g_hash_table_contains(ui->artists_set, song->artist)) {
+        g_hash_table_insert(ui->artists_set, g_strdup(song->artist), NULL);
         GtkWidget* row = gtk_list_box_row_new();
         GtkWidget* label = gtk_label_new(song->artist);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
@@ -34,19 +23,8 @@ static void add_to_library_ui(MmpUI* ui, Song* song) {
         gtk_list_box_append(ui->artists_list, row);
     }
 
-    bool album_exists = false;
-    GtkWidget* album_child = gtk_widget_get_first_child(GTK_WIDGET(ui->albums_list));
-    while (album_child) {
-        GtkWidget* label = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(album_child));
-        if (GTK_IS_BOX(label)) label = gtk_widget_get_first_child(label);
-        if (g_strcmp0(gtk_label_get_label(GTK_LABEL(label)), song->album) == 0) {
-            album_exists = true;
-            break;
-        }
-        album_child = gtk_widget_get_next_sibling(album_child);
-    }
-
-    if (!album_exists) {
+    if (!g_hash_table_contains(ui->albums_set, song->album)) {
+        g_hash_table_insert(ui->albums_set, g_strdup(song->album), NULL);
         GtkWidget* row = gtk_list_box_row_new();
         GtkWidget* label = gtk_label_new(song->album);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
@@ -632,12 +610,12 @@ static GtkWidget* create_library_panel(const char* search_placeholder, GtkListBo
     gtk_widget_add_css_class(panel_box, "library-panel");
     gtk_box_append(GTK_BOX(page_box), panel_box);
 
-    GtkWidget* search_entry = gtk_search_entry_new();
     if (search_placeholder) {
+        GtkWidget* search_entry = gtk_search_entry_new();
         gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(search_entry), search_placeholder);
+        gtk_box_append(GTK_BOX(panel_box), search_entry);
+        if (out_search) *out_search = GTK_SEARCH_ENTRY(search_entry);
     }
-    gtk_box_append(GTK_BOX(panel_box), search_entry);
-    if (out_search) *out_search = GTK_SEARCH_ENTRY(search_entry);
 
     GtkWidget* scrolled = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(scrolled, TRUE);
@@ -657,6 +635,9 @@ MmpUI* mmp_ui_new(GtkApplication* app, MmpLibrary* lib, MmpPlayback* pb) {
     MmpUI* ui = g_new0(MmpUI, 1);
     ui->library = lib;
     ui->playback = pb;
+
+    ui->artists_set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    ui->albums_set  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
     ui->window = GTK_WINDOW(gtk_application_window_new(app));
     g_object_set_data(G_OBJECT(ui->window), "mmp-ui", ui);
@@ -842,11 +823,11 @@ MmpUI* mmp_ui_new(GtkApplication* app, MmpLibrary* lib, MmpPlayback* pb) {
         gtk_stack_add_titled(ui->content_stack, page_box, "songs-view", "Songs");
     }
 
-    GtkWidget* albums_page = create_library_panel("Search albums", &ui->albums_list, NULL);
+    GtkWidget* albums_page = create_library_panel(NULL, &ui->albums_list, NULL);
     gtk_list_box_set_selection_mode(ui->albums_list, GTK_SELECTION_NONE);
     gtk_stack_add_titled(ui->content_stack, albums_page, "albums", "Albums");
 
-    GtkWidget* artists_page = create_library_panel("Search artists", &ui->artists_list, NULL);
+    GtkWidget* artists_page = create_library_panel(NULL, &ui->artists_list, NULL);
     gtk_list_box_set_selection_mode(ui->artists_list, GTK_SELECTION_NONE);
     gtk_stack_add_titled(ui->content_stack, artists_page, "artists", "Artists");
 
@@ -954,4 +935,27 @@ void mmp_ui_present_window(MmpUI *ui)
 MmpLibrary *mmp_ui_get_library(MmpUI *ui)
 {
     return ui ? ui->library : NULL;
+}
+
+void mmp_ui_free(MmpUI *ui)
+{
+    if (!ui) return;
+
+    if (ui->tick_timer_id)
+        g_source_remove(ui->tick_timer_id);
+
+    g_list_free_full(ui->queue_fallback_songs, (GDestroyNotify)free_song);
+    g_free(ui->selected_artist_filter);
+    g_free(ui->selected_album_filter);
+    g_free(ui->search_lowered_text);
+    g_free(ui->last_playing_path);
+    g_list_free_full(ui->current_view_filters, free_song_filter);
+
+    if (ui->current_view_base_list && ui->current_view_base_list_owned)
+        g_list_free(ui->current_view_base_list);
+
+    g_hash_table_unref(ui->artists_set);
+    g_hash_table_unref(ui->albums_set);
+
+    g_free(ui);
 }

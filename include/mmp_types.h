@@ -4,6 +4,8 @@
 #include <glib.h>
 #include <stdbool.h>
 
+G_BEGIN_DECLS
+
 typedef struct {
     char *path;
     char *title;
@@ -25,5 +27,7 @@ typedef struct {
     gpointer       user_data;
     GDestroyNotify notify;
 } SongFilter;
+
+G_END_DECLS
 
 #endif

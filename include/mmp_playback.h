@@ -3,6 +3,8 @@
 
 #include <glib-object.h>
 
+G_BEGIN_DECLS
+
 typedef enum {
     MMP_PLAYBACK_STOPPED,
     MMP_PLAYBACK_PLAYING,
@@ -23,5 +25,7 @@ void mmp_playback_set_mute     (MmpPlayback *pb, bool mute);
 
 double mmp_playback_get_position(MmpPlayback *pb);
 double mmp_playback_get_duration(MmpPlayback *pb);
+
+G_END_DECLS
 
 #endif
