@@ -1,6 +1,6 @@
-#include "database.h"
+#include "mmp_library.h"
+#include "sqlite3.h"
 #include <stdio.h>
-#include <string.h>
 
 static bool execute_sql(sqlite3* db, const char* sql) {
     char* err_msg = NULL;
@@ -274,6 +274,4 @@ void free_playlist(Playlist* p) {
     }
 }
 
-void free_song_list(GList* songs) {
-    g_list_free_full(songs, (GDestroyNotify)g_free); // This is not quite right as it doesn't free the internal fields
-}
+
