@@ -49,6 +49,8 @@ struct _MmpUI {
 
     GList          *queue_fallback_songs;
     guint           tick_timer_id;
+
+    char           *last_playing_path;
 };
 
 void ui_update_queue(MmpUI *ui);

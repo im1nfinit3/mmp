@@ -469,22 +469,14 @@ static void on_lib_queue_changed(MmpLibrary* lib, gpointer user_data) {
 }
 
 static void on_lib_now_playing_changed(MmpLibrary* lib, const Song* song, gpointer user_data) {
-    (void)lib; (void)song;
+    (void)lib;
     MmpUI* ui = (MmpUI*)user_data;
-    if (!ui->queue_store) return;
-    guint n = g_list_model_get_n_items(G_LIST_MODEL(ui->queue_store));
-    for (guint i = 0; i < n; i++) {
-        GObject* obj = g_list_model_get_item(G_LIST_MODEL(ui->queue_store), i);
-        MmpSongItem* item = MMP_SONG_ITEM(obj);
-        const char* path = item->song->path;
-        const char* cur = mmp_library_get_current_path(ui->library);
-        const char* old = NULL;
-        if (g_strcmp0(path, cur) == 0 || (old && g_strcmp0(path, old) == 0)) {
-            g_list_store_remove(ui->queue_store, i);
-            g_list_store_insert(ui->queue_store, i, obj);
-        }
-        g_object_unref(obj);
-    }
+
+    const char *old_path = ui->last_playing_path;
+    ui_update_now_playing(ui, old_path);
+    g_free(ui->last_playing_path);
+    ui->last_playing_path = song ? g_strdup(song->path) : NULL;
+
     if (!song) {
         gtk_label_set_label(ui->current_track_label, "No track playing");
         gtk_button_set_icon_name(ui->play_pause_button, "media-playback-start-symbolic");
