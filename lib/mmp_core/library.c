@@ -176,12 +176,24 @@ static void on_pb_tag_received(MmpPlayback *pb, const char *artist, const char *
     MmpLibrary *lib = MMP_LIBRARY(user_data);
 
     Song *s = g_hash_table_lookup(lib->songs_by_path, lib->current_file_path);
-    if (s) {
+    if (!s) return;
+
+    /* Only fill in from stream tags if metadata is missing.
+     * GstDiscoverer already parsed file tags during the scan;
+     * stream tags are often incomplete and shouldn't overwrite. */
+    bool updated = false;
+    if ((!s->artist || !s->artist[0]) && artist && artist[0]) {
         g_free(s->artist);
         s->artist = g_strdup(artist);
+        updated = true;
+    }
+    if ((!s->title || !s->title[0]) && title && title[0]) {
         g_free(s->title);
         s->title = g_strdup(title);
+        updated = true;
+    }
 
+    if (updated) {
         db_save_song(lib->library_db, s);
         g_signal_emit(lib, lib_signals[SIGNAL_NOW_PLAYING_CHANGED], 0, s);
     }
