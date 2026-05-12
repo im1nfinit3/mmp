@@ -428,7 +428,13 @@ void mute_button_clicked_cb(GtkButton *button, gpointer user_data) {
 void play_pause_clicked_cb(GtkButton *button, gpointer user_data) {
     (void)button;
     MmpUI *ui = user_data;
-    mmp_playback_toggle_pause(ui->playback);
+    if (!mmp_library_get_current_path(ui->library) && mmp_library_get_queue_length(ui->library) > 0) {
+        const char *path = mmp_library_get_queue_path_at(ui->library, 0);
+        if (path)
+            mmp_library_play_from_library(ui->library, path);
+    } else {
+        mmp_playback_toggle_pause(ui->playback);
+    }
 }
 
 void volume_scale_changed_cb(GtkRange *range, gpointer user_data) {

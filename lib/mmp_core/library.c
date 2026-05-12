@@ -185,6 +185,7 @@ static void on_pb_tag_received(MmpPlayback *pb, const char *artist, const char *
     (void)pb;
     MmpLibrary *lib = MMP_LIBRARY(user_data);
 
+    if (!lib->current_file_path) return;
     Song *s = g_hash_table_lookup(lib->songs_by_path, lib->current_file_path);
     if (!s) return;
 
