@@ -95,7 +95,7 @@ static void mmp_playback_class_init(MmpPlaybackClass *klass)
     signals[SIGNAL_STATE_CHANGED] = g_signal_new(
         "state-changed", MMP_TYPE_PLAYBACK, G_SIGNAL_RUN_LAST,
         0, NULL, NULL, NULL, G_TYPE_NONE, 1,
-        G_TYPE_BOOLEAN);
+        G_TYPE_INT);
 }
 
 MmpPlayback *mmp_playback_new(void)
@@ -109,7 +109,7 @@ void mmp_playback_play_uri(MmpPlayback *pb, const char *uri)
     gst_element_set_state(pb->playbin, GST_STATE_NULL);
     g_object_set(pb->playbin, "uri", uri, NULL);
     gst_element_set_state(pb->playbin, GST_STATE_PLAYING);
-    g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, TRUE);
+    g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, MMP_PLAYBACK_PLAYING);
 }
 
 void mmp_playback_toggle_pause(MmpPlayback *pb)
@@ -119,10 +119,10 @@ void mmp_playback_toggle_pause(MmpPlayback *pb)
     gst_element_get_state(pb->playbin, &state, NULL, 0);
     if (state == GST_STATE_PLAYING) {
         gst_element_set_state(pb->playbin, GST_STATE_PAUSED);
-        g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, FALSE);
+        g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, MMP_PLAYBACK_PAUSED);
     } else {
         gst_element_set_state(pb->playbin, GST_STATE_PLAYING);
-        g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, TRUE);
+        g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, MMP_PLAYBACK_PLAYING);
     }
 }
 
@@ -130,7 +130,7 @@ void mmp_playback_stop(MmpPlayback *pb)
 {
     g_return_if_fail(MMP_IS_PLAYBACK(pb));
     gst_element_set_state(pb->playbin, GST_STATE_READY);
-    g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, FALSE);
+    g_signal_emit(pb, signals[SIGNAL_STATE_CHANGED], 0, MMP_PLAYBACK_STOPPED);
 }
 
 void mmp_playback_seek(MmpPlayback *pb, double seconds)

@@ -35,9 +35,9 @@ void queue_drag_begin_cb(GtkDragSource *source, GdkDrag *drag, gpointer user_dat
 }
 
 gboolean queue_drop_cb(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
-    (void)value; (void)x; (void)y;
-    MmpUI *ui = user_data;
+    (void)value; (void)x; (void)y; (void)user_data;
     GtkWidget *row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
+    MmpUI *ui = get_ui_from_widget(row);
     GList *target_node = g_object_get_data(G_OBJECT(row), "playlist-node");
 
     if (drag_source_node && target_node && drag_source_node != target_node) {
@@ -425,25 +425,18 @@ void volume_controls_leave_cb(GtkEventControllerMotion *controller, gpointer use
 }
 
 void mute_button_clicked_cb(GtkButton *button, gpointer user_data) {
-    (void)user_data;
-    MmpPlayback *pb = g_object_get_data(G_OBJECT(button), "mmp-playback");
-    if (!pb) return;
+    MmpUI *ui = (MmpUI *)user_data;
+    ui->volume_muted = !ui->volume_muted;
 
-    bool is_muted = (g_strcmp0(gtk_button_get_icon_name(button), "audio-volume-muted-symbolic") == 0);
-    bool new_mute = !is_muted;
+    gtk_button_set_icon_name(button,
+        ui->volume_muted ? "audio-volume-muted-symbolic" : "audio-volume-medium-symbolic");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(button), ui->volume_muted ? "Unmute" : "Mute");
 
-    gtk_button_set_icon_name(
-        button,
-        new_mute ? "audio-volume-muted-symbolic" : "audio-volume-medium-symbolic"
-    );
-    gtk_widget_set_tooltip_text(GTK_WIDGET(button), new_mute ? "Unmute" : "Mute");
-
-    mmp_playback_set_mute(pb, new_mute);
+    mmp_playback_set_mute(ui->playback, ui->volume_muted);
 
     GtkWidget *volume_scale = GTK_WIDGET(g_object_get_data(G_OBJECT(button), "volume-scale"));
-    if (volume_scale) {
-        gtk_widget_set_sensitive(volume_scale, !new_mute);
-    }
+    if (volume_scale)
+        gtk_widget_set_sensitive(volume_scale, !ui->volume_muted);
 }
 
 void play_pause_clicked_cb(GtkButton *button, gpointer user_data) {

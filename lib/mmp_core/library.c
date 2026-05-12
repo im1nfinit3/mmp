@@ -43,7 +43,7 @@ enum {
 static guint lib_signals[N_SIGNALS] = {0};
 
 static GList *get_next_track_node(MmpLibrary *lib);
-void db_save_song(sqlite3 *db, const Song *song);
+bool db_save_song(sqlite3 *db, const Song *song);
 
 /* ---- database prototypes (from database.c) ---- */
 extern bool   db_init(const char *db_path, sqlite3 **db_out);
@@ -61,7 +61,7 @@ extern bool   db_remove_song_from_playlist(sqlite3 *db, int playlist_id, const c
 static void on_pb_eos          (MmpPlayback *pb, gpointer user_data);
 static void on_pb_tag_received (MmpPlayback *pb, const char *artist, const char *title, gpointer user_data);
 static void on_pb_error        (MmpPlayback *pb, const char *message, gpointer user_data);
-static void on_pb_state_changed(MmpPlayback *pb, gboolean playing, gpointer user_data);
+static void on_pb_state_changed(MmpPlayback *pb, int state, gpointer user_data);
 
 /* ---- directory scan ---- */
 static void scan_directory_recursive(MmpLibrary *lib, const char *path, GHashTable *existing_paths);
@@ -207,15 +207,15 @@ static void on_pb_error(MmpPlayback *pb, const char *message, gpointer user_data
     g_signal_emit(lib, lib_signals[SIGNAL_NOW_PLAYING_CHANGED], 0, NULL);
 }
 
-static void on_pb_state_changed(MmpPlayback *pb, gboolean playing, gpointer user_data)
+static void on_pb_state_changed(MmpPlayback *pb, int state, gpointer user_data)
 {
     (void)pb;
     MmpLibrary *lib = MMP_LIBRARY(user_data);
 
-    if (playing && lib->current_file_path) {
+    if (state == MMP_PLAYBACK_PLAYING && lib->current_file_path) {
         Song *s = g_hash_table_lookup(lib->songs_by_path, lib->current_file_path);
         g_signal_emit(lib, lib_signals[SIGNAL_NOW_PLAYING_CHANGED], 0, s);
-    } else if (!playing) {
+    } else if (state == MMP_PLAYBACK_STOPPED) {
         g_signal_emit(lib, lib_signals[SIGNAL_NOW_PLAYING_CHANGED], 0, NULL);
     }
 }

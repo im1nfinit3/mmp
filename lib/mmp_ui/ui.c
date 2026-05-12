@@ -931,7 +931,7 @@ MmpUI* mmp_ui_new(GtkApplication* app, MmpLibrary* lib, MmpPlayback* pb) {
     g_signal_connect(volume_motion, "leave", G_CALLBACK(volume_controls_leave_cb), volume_revealer);
     gtk_widget_add_controller(volume_controls, volume_motion);
 
-    g_signal_connect(mute_button, "clicked", G_CALLBACK(mute_button_clicked_cb), NULL);
+    g_signal_connect(mute_button, "clicked", G_CALLBACK(mute_button_clicked_cb), ui);
     g_signal_connect(ui->shuffle_button, "clicked", G_CALLBACK(shuffle_clicked_cb), ui);
     g_signal_connect(ui->repeat_button, "clicked", G_CALLBACK(repeat_clicked_cb), ui);
     g_signal_connect(ui->play_pause_button, "clicked", G_CALLBACK(play_pause_clicked_cb), ui);

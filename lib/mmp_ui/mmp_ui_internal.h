@@ -51,6 +51,8 @@ struct _MmpUI {
     guint           tick_timer_id;
 
     char           *last_playing_path;
+
+    bool            volume_muted;
 };
 
 void ui_update_queue(MmpUI *ui);

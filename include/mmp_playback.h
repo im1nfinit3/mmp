@@ -3,6 +3,12 @@
 
 #include <glib-object.h>
 
+typedef enum {
+    MMP_PLAYBACK_STOPPED,
+    MMP_PLAYBACK_PLAYING,
+    MMP_PLAYBACK_PAUSED
+} MmpPlaybackState;
+
 #define MMP_TYPE_PLAYBACK (mmp_playback_get_type())
 G_DECLARE_FINAL_TYPE(MmpPlayback, mmp_playback, MMP, PLAYBACK, GObject)
 
