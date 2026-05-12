@@ -123,10 +123,6 @@ void navigation_row_selected_cb(GtkListBox* list_box, GtkListBoxRow* row, gpoint
 void create_playlist_action_cb(GSimpleAction* action, GVariant* parameter, gpointer user_data);
 gboolean on_drop_cb(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
 
-typedef struct {
-    GtkStack* stack;
-} LibraryNavRows;
-
 static void song_factory_setup(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer user_data) {
     (void)factory; (void)user_data;
 
@@ -909,10 +905,7 @@ MmpUI* mmp_ui_new(GtkApplication* app, MmpLibrary* lib, MmpPlayback* pb) {
 
     GtkEventController* volume_motion = gtk_event_controller_motion_new();
 
-    LibraryNavRows* library_nav_rows = g_new(LibraryNavRows, 1);
-    library_nav_rows->stack = ui->content_stack;
-
-    g_signal_connect_data(ui->navigation_list, "row-selected", G_CALLBACK(navigation_row_selected_cb), library_nav_rows, (GClosureNotify)g_free, 0);
+    g_signal_connect(ui->navigation_list, "row-selected", G_CALLBACK(navigation_row_selected_cb), ui);
 
     gtk_list_box_select_row(ui->navigation_list, nav_recently_added_row);
     load_css(ui->window);

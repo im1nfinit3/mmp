@@ -14,10 +14,6 @@ typedef struct {
     MmpUI         *ui;
 } QueueActionData;
 
-typedef struct {
-    GtkStack *stack;
-} LibraryNavRows;
-
 static MmpUI* get_ui_from_widget(GtkWidget *widget) {
     GtkRoot *root = gtk_widget_get_root(widget);
     if (!root) return NULL;
@@ -708,14 +704,11 @@ void playlists_header_right_clicked_cb(GtkGestureClick *gesture, int n_press, do
 
 void navigation_row_selected_cb(GtkListBox *list_box, GtkListBoxRow *row, gpointer user_data) {
     (void)list_box;
-    LibraryNavRows *rows = user_data;
+    MmpUI *ui = user_data;
 
     if (row == NULL) {
         return;
     }
-
-    MmpUI *ui = get_ui_from_widget(GTK_WIDGET(rows->stack));
-    if (!ui) return;
 
     const char *page_name = g_object_get_data(G_OBJECT(row), "stack-page");
     if (page_name != NULL) {
@@ -755,7 +748,7 @@ void navigation_row_selected_cb(GtkListBox *list_box, GtkListBoxRow *row, gpoint
         ui_add_filter(ui, search_filter_func, ui, NULL);
 
         ui_refresh_view(ui);
-        gtk_stack_set_visible_child_name(rows->stack, page_name);
+        gtk_stack_set_visible_child_name(ui->content_stack, page_name);
 
         g_free(ui->selected_artist_filter);
         ui->selected_artist_filter = NULL;
