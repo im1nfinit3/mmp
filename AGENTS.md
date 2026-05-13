@@ -68,7 +68,6 @@ GTK widget signals (button clicks, range changes, etc.) pass specific typed poin
 - **`MmpLibrary.songs`** is a `GList` of `Song*`. An accompanying `GHashTable* songs_by_path` maps `song->path → Song*` for O(1) lookup — use `mmp_library_find_song()` instead of scanning.
 - **`MmpLibrary.unplayed_pool`** is a `GPtrArray` of `GList*` queue-node pointers for shuffle mode. O(1) indexed access via `g_ptr_array_index`, O(1) add/remove via `g_ptr_array_add` / `g_ptr_array_remove_index_fast`.
 - **Song/queue views** use `GListStore` + `GtkSingleSelection` + `GtkListView` with `GtkSignalListItemFactory` (`setup`/`bind` callbacks). Track-change indicator updates go through `ui_update_now_playing`, not full store rebuilds. Full rebuilds via `ui_refresh_view` only on view/filter changes.
-- **Song ownership**: `Song*` is always owned by `MmpLibrary`. Everything else treats it as borrowed.
 
 ## Code generation
 
