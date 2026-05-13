@@ -6,7 +6,7 @@
 cmake -B build -S . && cmake --build build
 ```
 
-Binary at `build/mmp`. Out-of-source build only — never edit files in `build/`.
+Out-of-source build only — never edit files in `build/`.
 
 ## Dependencies
 
@@ -75,7 +75,7 @@ GTK widget signals (button clicks, range changes, etc.) pass specific typed poin
 
 ## SQLite
 
-`lib/sqlite/sqlite3-all.c` is the amalgamation entrypoint that `#include`s `sqlite3-1.c` through `sqlite3-9.c`, compiling the entire engine as one translation unit. Only `sqlite3-all.c` appears in CMakeLists.txt.
+`lib/sqlite/sqlite3-all.c` is the amalgamation entrypoint — only it appears in CMakeLists.txt, the rest are `#include`d.
 
 Database files are created at runtime in `~/.config/mmp/`:
 - `library.db` — cached song metadata
@@ -89,5 +89,5 @@ Scanned from `$XDG_MUSIC_DIR` on startup. Supported formats: `.mp3`, `.flac`, `.
 
 - C23, GLib allocation (`g_new0`, `g_free`, `g_strdup`, etc.)
 - Build type: `MinSizeRel` (`-Os -DNDEBUG`)
-- `compile_commands.json` is generated for clangd (cache at `.cache/clangd/`)
-- No tests, no linter, no CI, no pre-commit hooks
+- `compile_commands.json` is generated for clangd
+- No tests, no CI
