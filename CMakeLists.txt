@@ -31,29 +31,20 @@ add_custom_command(
     VERBATIM
 )
 
-set(SOURCES
-    src/main.c
-    src/ui.c
-    src/ui_callbacks.c
-    src/playback.c
-    src/database.c
-    src/sqlite/sqlite3-all.c
-    ${GRESOURCE_C}
-)
+add_subdirectory(lib/sqlite)
+add_subdirectory(lib/mmp_core)
+add_subdirectory(lib/mmp_ui)
 
-add_executable(mmp ${SOURCES})
+add_executable(mmp src/main.c ${GRESOURCE_C})
+target_include_directories(mmp PRIVATE include/)
 target_link_libraries(mmp PRIVATE
+    mmp_ui
+    mmp_core
+    sqlite
     ${GTK4_LIBRARIES}
     ${GSTREAMER_LIBRARIES}
 )
 target_link_directories(mmp PRIVATE
     ${GTK4_LIBRARY_DIRS}
     ${GSTREAMER_LIBRARY_DIRS}
-)
-
-target_include_directories(mmp PRIVATE
-    include/
-    src/sqlite/
-    ${GTK4_INCLUDE_DIRS}
-    ${GSTREAMER_INCLUDE_DIRS}
 )
