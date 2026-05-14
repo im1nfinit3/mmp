@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
 use gstreamer as gst;
-use gstreamer::prelude::*;
 use gstreamer_pbutils::Discoverer;
 
 use crate::library::song::Song;
@@ -28,13 +27,23 @@ struct ScanState {
     walkdir_done: bool,
     pending: usize,
     total: usize,
+    song_batch: Vec<Song>,
     poll_source: Option<glib::SourceId>,
 }
 
 impl ScanState {
+    fn flush_song_batch(&mut self) {
+        if !self.song_batch.is_empty() {
+            self.library_handle
+                .add_songs(std::mem::take(&mut self.song_batch));
+            self.song_batch = Vec::with_capacity(25);
+        }
+    }
+
     /// Check whether the scan is fully complete and clean up if so.
     fn check_complete(&mut self) {
         if self.walkdir_done && self.pending == 0 {
+            self.flush_song_batch();
             let _ = self
                 .event_tx
                 .send(LibraryEvent::ScanComplete { total: self.total });
@@ -120,6 +129,7 @@ pub fn start_scan(
         walkdir_done: false,
         pending: 0,
         total: 0,
+        song_batch: Vec::with_capacity(25),
         poll_source: None,
     }));
 
@@ -174,7 +184,10 @@ pub fn start_scan(
                 }
             }
 
-            s.library_handle.add_songs(vec![song]);
+            s.song_batch.push(song);
+            if s.song_batch.len() >= 25 {
+                s.flush_song_batch();
+            }
             s.total += 1;
             s.pending = s.pending.saturating_sub(1);
             s.check_complete();
@@ -217,4 +230,3 @@ pub fn start_scan(
     // -- Start processing the queue --
     discoverer.start();
 }
-
