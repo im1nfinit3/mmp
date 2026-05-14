@@ -71,6 +71,7 @@ impl Playback {
 
     fn setup_bus_watch(&mut self) {
         let bus = self.playbin.bus().expect("playbin has no bus");
+        bus.add_signal_watch();
         let tx = self.event_tx.clone();
 
         bus.connect_message(None, move |_, msg: &gst::Message| {
@@ -103,6 +104,11 @@ impl Playback {
         });
     }
 
+    fn is_playing(&self) -> bool {
+        let (result, current, _pending) = self.playbin.state(None);
+        result.is_ok() && current == gst::State::Playing
+    }
+
     // -- Playback control --
 
     /// Play the file at `path`. Returns immediately; playback starts async.
@@ -110,6 +116,7 @@ impl Playback {
         self.playbin
             .set_property("uri", format!("file://{}", path.display()));
         let _ = self.playbin.set_state(gst::State::Playing);
+        self.start_ui_timer();
         self.event_tx
             .send(PlaybackEvent::StateChanged(PlaybackState::Playing))
             .ok();
@@ -117,10 +124,7 @@ impl Playback {
 
     /// Toggle between Playing and Paused.
     pub fn toggle_pause(&mut self) {
-        let (change_result, current, _pending) = self.playbin.state(None);
-        let is_playing = change_result.is_ok() && current == gst::State::Playing;
-
-        if is_playing {
+        if self.is_playing() {
             let _ = self.playbin.set_state(gst::State::Paused);
             self.event_tx
                 .send(PlaybackEvent::StateChanged(PlaybackState::Paused))
@@ -135,6 +139,8 @@ impl Playback {
 
     /// Stop playback entirely.
     pub fn stop(&mut self) {
+        self.stop_ui_timer();
+
         let _ = self.playbin.set_state(gst::State::Null);
         self.event_tx
             .send(PlaybackEvent::StateChanged(PlaybackState::Stopped))
@@ -159,18 +165,7 @@ impl Playback {
         self.playbin.set_property("mute", mute);
     }
 
-    /// Query current position (seconds) and duration (seconds).
-    pub fn query_position(&self) -> Option<(f64, f64)> {
-        let pos = self.playbin.query_position::<gst::ClockTime>();
-        let dur = self.playbin.query_duration::<gst::ClockTime>();
-        match (pos, dur) {
-            (Some(p), Some(d)) => Some((p.seconds() as f64, d.seconds() as f64)),
-            _ => None,
-        }
-    }
-
     // -- Periodic UI update timer --
-
     /// Start a 500 ms timer that sends `PlaybackEvent::Position` updates.
     pub fn start_ui_timer(&mut self) {
         if self.update_timer_id.is_some() {

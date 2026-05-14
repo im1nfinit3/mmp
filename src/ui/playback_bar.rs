@@ -322,7 +322,7 @@ impl SimpleComponent for PlaybackBar {
                 PlaybackEvent::Tags { title, artist } => {
                     let label = match (title, artist) {
                         (Some(t), Some(a)) if !a.is_empty() && a != "Unknown Artist" => {
-                            format!("{} — {}", t, a)
+                            format!("{} - {}", t, a)
                         }
                         (Some(t), _) => t,
                         (None, Some(a)) => a,
