@@ -43,8 +43,6 @@ pub struct ContentPane {
     selected_artist: Option<String>,
     /// Selected album filter.
     selected_album: Option<String>,
-    /// Whether the visible list needs a rebuild.
-    dirty_lists: bool,
     /// Paths currently displayed in the song list (shared with signal handler).
     displayed_song_paths: Rc<RefCell<Vec<PathBuf>>>,
     /// Path of the currently-playing track (for CSS highlighting).
@@ -142,6 +140,8 @@ impl SimpleComponent for ContentPane {
             crate::ui::widgets::build_library_panel("Search artists");
 
         let queue_list_box = gtk4::ListBox::new();
+        let displayed = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
+
         queue_list_box.add_css_class("library-list");
         queue_list_box.add_css_class("boxed-list");
 
@@ -211,20 +211,6 @@ impl SimpleComponent for ContentPane {
         // TODO: wire albums/artists search properly in context menu phase
 
         // -- Song double-click → play --
-        let displayed = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
-        {
-            let s = sender.clone();
-            let paths = Rc::clone(&displayed);
-            songs_list_box.connect_row_activated(move |_list, row| {
-                let idx = row.index() as usize;
-                let p = paths.borrow();
-                if let Some(path) = p.get(idx) {
-                    s.output(ContentPaneOutput::PlayFromLibrary(path.clone()))
-                        .ok();
-                }
-            });
-        }
-
         // -- Albums/Artists click → filter songs --
         {
             let s = sender.clone();
@@ -265,7 +251,6 @@ impl SimpleComponent for ContentPane {
             search_artists_lowered: String::new(),
             selected_artist: None,
             selected_album: None,
-            dirty_lists: true,
             displayed_song_paths: displayed,
             current_track_path: None,
             playlists: Vec::new(),
@@ -288,24 +273,22 @@ impl SimpleComponent for ContentPane {
             ContentPaneMsg::SetPage(page) => {
                 self.current_page = page;
                 self.current_playlist_id = 0;
-                self.dirty_lists = true;
+                self.sync_lists();
             }
             ContentPaneMsg::SetPlaylists(playlists) => {
                 self.playlists = playlists;
+                self.sync_lists();
             }
             ContentPaneMsg::SongsAdded | ContentPaneMsg::SongsLoaded => {
-                self.dirty_lists = true;
+                self.sync_lists();
             }
             ContentPaneMsg::CurrentTrackPath(path) => {
                 self.current_track_path = path;
-                self.dirty_lists = true;
+                self.sync_lists();
             }
             ContentPaneMsg::PlaybackEvent(_event) => {
                 // Handled for current-track highlighting if needed
             }
-        }
-        if self.dirty_lists {
-            self.sync_lists();
         }
     }
 }
@@ -328,7 +311,6 @@ impl ContentPane {
             Page::Queue => self.rebuild_queue_list(),
             Page::Settings => {}
         }
-        self.dirty_lists = false;
     }
 
     fn filtered_songs(&self) -> Vec<Song> {
@@ -410,6 +392,20 @@ impl ContentPane {
 
         let row = gtk4::ListBoxRow::new();
         row.set_child(Some(&row_box));
+
+        let path = song.path.clone();
+        let sender = self.sender.clone();
+        // -- Double-click → play --
+        let doubleclick = gtk4::GestureClick::new();
+        doubleclick.set_button(0); // left button
+        doubleclick.connect_pressed(move |_gesture, n_press, _x, _y| {
+            if n_press == 2 {
+                sender
+                    .output(ContentPaneOutput::PlayFromLibrary(path.clone()))
+                    .ok();
+            }
+        });
+        row.add_controller(doubleclick);
 
         // -- Right-click context menu --
         let path = song.path.clone();

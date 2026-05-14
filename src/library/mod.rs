@@ -227,6 +227,10 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
             .and_then(|conn| db::get_playlists(conn).ok())
             .unwrap_or_default();
 
+        if !playlists.is_empty() {
+            let _ = event_tx.send(LibraryEvent::PlaylistsChanged);
+        }
+
         // -- Notify UI of cached data --
         if !songs.is_empty() {
             let _ = event_tx.send(LibraryEvent::SongsLoaded {
