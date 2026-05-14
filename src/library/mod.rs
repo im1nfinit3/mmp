@@ -14,6 +14,7 @@ use self::song::Song;
 
 pub mod db;
 pub mod filter;
+pub mod metadata;
 pub mod scan;
 pub mod song;
 
@@ -239,7 +240,13 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                 LibraryCommand::AddSongs { songs: new_songs } => {
                     for song in &new_songs {
                         if let Some(conn) = &library_db {
-                            let _ = db::save_song(conn, song);
+                            if let Err(err) = db::save_song(conn, song) {
+                                eprintln!(
+                                    "Failed to save metadata for {}: {:?}",
+                                    song.path.display(),
+                                    err
+                                );
+                            }
                         }
                         if let Some(&idx) = by_path.get(&song.path) {
                             songs[idx] = song.clone();

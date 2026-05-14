@@ -5,12 +5,9 @@ pub use queue::QueueState;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
-use gstreamer_pbutils::Discoverer;
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
-
-use crate::library::song::Song;
 
 // ---------------------------------------------------------------------------
 // Messages emitted by the playback engine for the UI layer
@@ -47,7 +44,6 @@ pub enum PlaybackState {
 
 pub struct Playback {
     playbin: gst::Element,
-    discoverer: Discoverer,
     event_tx: mpsc::Sender<PlaybackEvent>,
     /// Timer ID for periodic UI updates.
     update_timer_id: Option<glib::SourceId>,
@@ -62,13 +58,8 @@ impl Playback {
             .build()
             .expect("Failed to create playbin element");
 
-        // GstDiscoverer with 2-second timeout
-        let discoverer = Discoverer::new(gst::ClockTime::from_seconds(2))
-            .expect("Failed to create GstDiscoverer");
-
         let mut pb = Self {
             playbin,
-            discoverer,
             event_tx,
             update_timer_id: None,
         };
@@ -210,45 +201,6 @@ impl Playback {
     pub fn stop_ui_timer(&mut self) {
         if let Some(id) = self.update_timer_id.take() {
             id.remove();
-        }
-    }
-
-    // -- Metadata extraction via GstDiscoverer --
-
-    /// Extract metadata (title, artist, album, duration) from a file.
-    /// Returns the Song with populated fields.
-    pub fn extract_metadata(&self, song: &mut Song) {
-        let uri = format!("file://{}", song.path.display());
-        match self.discoverer.discover_uri(&uri) {
-            Ok(info) => {
-                // Duration
-                if let Some(dur) = info.duration() {
-                    let total_secs = dur.seconds();
-                    let mins = total_secs / 60;
-                    let secs = total_secs % 60;
-                    song.duration_str = format!("{}:{:02}", mins, secs);
-                }
-
-                // Tags
-                if let Some(tags) = info.tags() {
-                    if let Some(title) = tags.get::<gst::tags::Title>() {
-                        song.title = title.get().to_string();
-                    }
-                    if let Some(artist) = tags.get::<gst::tags::Artist>() {
-                        song.artist = artist.get().to_string();
-                    }
-                    if let Some(album) = tags.get::<gst::tags::Album>() {
-                        song.album = album.get().to_string();
-                    }
-                }
-            }
-            Err(err) => {
-                eprintln!(
-                    "Failed to discover metadata for {}: {:?}",
-                    song.path.display(),
-                    err
-                );
-            }
         }
     }
 }

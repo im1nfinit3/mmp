@@ -7,14 +7,15 @@
 //!
 //! Files with discovery errors are skipped (may be revisited in the future).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
 use gstreamer as gst;
 use gstreamer_pbutils::Discoverer;
 
-use crate::library::song::Song;
 use crate::library::{LibraryEvent, LibraryHandle, db};
+use crate::library::{metadata, song::Song};
 
 // ---------------------------------------------------------------------------
 // Shared mutable state between timeout poll and signal callbacks
@@ -28,6 +29,7 @@ struct ScanState {
     pending: usize,
     total: usize,
     song_batch: Vec<Song>,
+    pending_paths: HashMap<String, PathBuf>,
     poll_source: Option<glib::SourceId>,
 }
 
@@ -134,6 +136,7 @@ pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryE
         pending: 0,
         total: 0,
         song_batch: Vec::with_capacity(25),
+        pending_paths: HashMap::new(),
         poll_source: None,
     }));
 
@@ -147,14 +150,20 @@ pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryE
                 eprintln!("Discovery error for {}: {:?}", info.uri(), err);
                 // TODO: may revisit — currently skipping files with
                 // discovery errors
+                s.pending_paths.remove(info.uri().as_str());
                 s.pending = s.pending.saturating_sub(1);
                 s.check_complete();
                 return;
             }
 
-            // Reconstruct file path from URI
             let uri_str = info.uri().to_string();
-            let path = PathBuf::from(uri_str.strip_prefix("file://").unwrap_or(&uri_str));
+            let path = s
+                .pending_paths
+                .remove(&uri_str)
+                .or_else(|| glib::filename_from_uri(&uri_str).ok().map(|(path, _)| path))
+                .unwrap_or_else(|| {
+                    PathBuf::from(uri_str.strip_prefix("file://").unwrap_or(&uri_str))
+                });
 
             let mut song = Song::new(path);
 
@@ -166,21 +175,7 @@ pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryE
                 song.duration_str = format!("{}:{:02}", mins, secs);
             }
 
-            // Tags — discoverer_info.tags() is deprecated since
-            // GStreamer 1.20 but remains functional.  The non-deprecated
-            // path uses per-stream tags via audio_streams().
-            #[allow(deprecated)]
-            if let Some(tags) = info.tags() {
-                if let Some(title) = tags.get::<gst::tags::Title>() {
-                    song.title = title.get().to_string();
-                }
-                if let Some(artist) = tags.get::<gst::tags::Artist>() {
-                    song.artist = artist.get().to_string();
-                }
-                if let Some(album) = tags.get::<gst::tags::Album>() {
-                    song.album = album.get().to_string();
-                }
-            }
+            metadata::apply_discoverer_tags(&mut song, info);
 
             s.song_batch.push(song);
             if s.song_batch.len() >= 25 {
@@ -206,9 +201,16 @@ pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryE
                 s.check_complete();
             } else {
                 for path in &batch {
-                    let uri = format!("file://{}", path.display());
-                    if discoverer_for_poll.discover_uri_async(&uri).is_ok() {
-                        s.pending += 1;
+                    match glib::filename_to_uri(path, None) {
+                        Ok(uri) => {
+                            if discoverer_for_poll.discover_uri_async(&uri).is_ok() {
+                                s.pending_paths.insert(uri.to_string(), path.clone());
+                                s.pending += 1;
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Failed to build URI for {}: {:?}", path.display(), err);
+                        }
                     }
                 }
             }

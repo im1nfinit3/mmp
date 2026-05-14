@@ -147,31 +147,38 @@ pub fn get_metadata_cache(
     conn: &Connection,
 ) -> SqlResult<std::collections::HashMap<PathBuf, FileFingerprint>> {
     let mut stmt = conn.prepare(
-        "SELECT path, file_size, modified_unix_ms, metadata_version
+        "SELECT path, title, artist, album, duration_str,
+                file_size, modified_unix_ms, metadata_version
          FROM songs
          WHERE file_size IS NOT NULL
-           AND metadata_version = ?1
-           AND COALESCE(title, '') != ''
-           AND COALESCE(artist, '') != ''
-           AND COALESCE(album, '') != ''
-           AND COALESCE(duration_str, '') != ''",
+           AND metadata_version = ?1",
     )?;
     let rows = stmt.query_map(params![CURRENT_METADATA_VERSION], |row| {
-        let file_size: i64 = row.get(1)?;
+        let path = PathBuf::from(row.get::<_, String>(0)?);
+        let song = Song {
+            path: path.clone(),
+            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            duration_str: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        };
+        let file_size: i64 = row.get(5)?;
         Ok((
-            PathBuf::from(row.get::<_, String>(0)?),
+            song,
             FileFingerprint {
                 file_size: file_size.max(0) as u64,
-                modified_unix_ms: row.get(2)?,
-                metadata_version: row.get(3)?,
+                modified_unix_ms: row.get(6)?,
+                metadata_version: row.get(7)?,
             },
         ))
     })?;
 
     let mut cache = std::collections::HashMap::new();
     for row in rows {
-        let (path, fingerprint) = row?;
-        cache.insert(path, fingerprint);
+        let (song, fingerprint) = row?;
+        if song.has_complete_metadata() {
+            cache.insert(song.path, fingerprint);
+        }
     }
     Ok(cache)
 }
