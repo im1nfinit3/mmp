@@ -46,11 +46,6 @@ pub enum AppMsg {
     DeletePlaylist(i64),
     RenamePlaylist(i64, String),
     AddToPlaylist(i64, PathBuf),
-    ScanStarted,
-    ScanComplete(usize),
-    ScanAddSong(PathBuf),
-    BatchScan(Vec<PathBuf>),
-    ScanError(String),
     Tick,
 }
 
@@ -81,8 +76,6 @@ pub struct AppModel {
     pub displayed_song_paths: RefCell<Vec<PathBuf>>,
     /// True when the visible list is stale and needs a rebuild.
     pub dirty_lists: bool,
-    /// Songs discovered by the scanner, waiting to be added to the library.
-    pub scan_pending: std::collections::VecDeque<PathBuf>,
 
     // Cached widget refs (cloned from view_output! or set in init)
     pub current_track_label: gtk4::Label,
@@ -488,6 +481,7 @@ impl SimpleComponent for AppModel {
 
         // -- Spawn Library actor --
         let (lib_event_tx, lib_event_rx) = mpsc::channel();
+        let scan_event_tx = lib_event_tx.clone();
         let library_handle = crate::library::spawn(lib_event_tx);
 
         // -- Build model --
@@ -513,7 +507,6 @@ impl SimpleComponent for AppModel {
             recently_added_reverse: true,
             displayed_song_paths: RefCell::new(Vec::new()),
             dirty_lists: true,
-            scan_pending: std::collections::VecDeque::new(),
             current_track_label: widgets.current_track_label.clone(),
             play_pause_button: widgets.play_pause_button.clone(),
             shuffle_button: widgets.shuffle_button.clone(),
@@ -626,12 +619,13 @@ impl SimpleComponent for AppModel {
         });
 
         // -- Directory scan (deferred 300ms so window renders first) --
-        let sender_clone = sender.clone();
+        let lib_h = model.library_handle.clone();
+        let scan_tx = scan_event_tx;
+        let scan_state = std::cell::RefCell::new(Some((lib_h, scan_tx)));
         glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
-            let s = sender_clone.clone();
-            std::thread::spawn(move || {
-                scan::scan_directory(s);
-            });
+            if let Some((handle, tx)) = scan_state.borrow_mut().take() {
+                scan::start_scan(handle, tx);
+            }
             glib::ControlFlow::Break // one-shot
         });
 
@@ -696,14 +690,6 @@ impl SimpleComponent for AppModel {
                 }
                 // Fast: button states + track label
                 self.sync_progress();
-
-                // Process pending scan batch — cap at 300 per tick to yield main loop
-                if !self.scan_pending.is_empty() {
-                    let limit = self.scan_pending.len().min(300);
-                    let batch: Vec<PathBuf> = self.scan_pending.drain(..limit).collect();
-                    self.process_scan_batch(batch);
-                    self.dirty_lists = true;
-                }
 
                 // Slow: rebuild lists only when content changed
                 if self.dirty_lists {
@@ -798,31 +784,17 @@ impl SimpleComponent for AppModel {
                 self.dirty_lists = true;
             }
 
-            AppMsg::CreatePlaylist(_) => {}
-            AppMsg::DeletePlaylist(_) => {}
-            AppMsg::RenamePlaylist(_, _) => {}
-            AppMsg::AddToPlaylist(_, _) => {}
-            AppMsg::ScanAddSong(path) => {
-                // Queue for batch processing in Tick — don't rebuild here
-                self.scan_pending.push_back(path);
+            AppMsg::CreatePlaylist(name) => {
+                let _ = self.library_handle.create_playlist(&name);
             }
-            AppMsg::BatchScan(paths) => {
-                // Queue for capped processing in Tick — don't block here
-                self.scan_pending.extend(paths);
-                self.dirty_lists = true;
+            AppMsg::DeletePlaylist(id) => {
+                self.library_handle.delete_playlist(id);
             }
-            AppMsg::ScanStarted => {}
-            AppMsg::ScanComplete(count) => {
-                eprintln!("Library scan complete: {} songs", count);
-                // Flush any remaining pending songs
-                if !self.scan_pending.is_empty() {
-                    let batch: Vec<PathBuf> = self.scan_pending.drain(..).collect();
-                    self.process_scan_batch(batch);
-                }
-                self.dirty_lists = true;
+            AppMsg::RenamePlaylist(id, name) => {
+                self.library_handle.rename_playlist(id, &name);
             }
-            AppMsg::ScanError(err) => {
-                eprintln!("Library scan error: {}", err);
+            AppMsg::AddToPlaylist(playlist_id, path) => {
+                self.library_handle.add_to_playlist(playlist_id, path);
             }
         }
 
@@ -848,11 +820,6 @@ impl AppModel {
             if let Some(ref mut pb) = self.playback { pb.stop(); }
             self.queue.current = None;
         }
-    }
-
-    fn process_scan_batch(&mut self, paths: Vec<PathBuf>) {
-        let songs: Vec<Song> = paths.into_iter().map(Song::new).collect();
-        self.library_handle.add_songs(songs);
     }
 
     fn sync_progress(&self) {
@@ -898,46 +865,6 @@ impl AppModel {
             Page::Settings => {},
         }
         self.dirty_lists = false;
-    }
-
-    fn sync_ui(&mut self) {
-        let name = match self.current_page {
-            Page::RecentlyAdded | Page::Songs => "songs-view",
-            Page::Albums => "albums",
-            Page::Artists => "artists",
-            Page::Queue => "queue",
-            Page::Settings => "settings",
-        };
-        self.content_stack.set_visible_child_name(name);
-
-        if let Some(song) = self.current_song() {
-            self.current_track_label.set_label(&song.label());
-        } else {
-            self.current_track_label.set_label("No track selected");
-        }
-
-        if self.queue.shuffle {
-            self.shuffle_button.set_css_classes(&["playback-button", "active-control"]);
-        } else {
-            self.shuffle_button.set_css_classes(&["playback-button"]);
-        }
-        if self.queue.repeat != RepeatMode::Off {
-            self.repeat_button.set_css_classes(&["playback-button", "active-control"]);
-        } else {
-            self.repeat_button.set_css_classes(&["playback-button"]);
-        }
-
-        self.volume_scale.set_value(self.volume * 100.0);
-        let icon = if self.muted { "audio-volume-muted-symbolic" } else { "audio-volume-medium-symbolic" };
-        self.mute_button.set_icon_name(icon);
-
-        match self.current_page {
-            Page::Songs | Page::RecentlyAdded => self.rebuild_song_list(),
-            Page::Albums => self.rebuild_albums_list(),
-            Page::Artists => self.rebuild_artists_list(),
-            Page::Queue => self.rebuild_queue_list(),
-            Page::Settings => {},
-        }
     }
 
     fn rebuild_song_list(&mut self) {
