@@ -49,12 +49,12 @@ pub struct AppModel {
     pub playback_rx: Option<mpsc::Receiver<PlaybackEvent>>,
     pub volume: f64,
     pub muted: bool,
-    /// Sender for the PlaybackBar sub-component.
-    playback_bar: relm4::Sender<PlaybackBarMsg>,
-    /// Sender for the NavPane sub-component.
-    nav_pane: relm4::Sender<NavPaneMsg>,
-    /// Sender for the ContentPane sub-component.
-    content_pane: relm4::Sender<ContentPaneMsg>,
+    /// PlaybackBar sub-component controller.
+    playback_bar: relm4::Controller<PlaybackBar>,
+    /// NavPane sub-component controller.
+    nav_pane: relm4::Controller<NavPane>,
+    /// ContentPane sub-component controller.
+    content_pane: relm4::Controller<ContentPane>,
     /// Current track path (for forwarding to ContentPane).
     current_track_path: Option<PathBuf>,
 }
@@ -137,7 +137,6 @@ impl SimpleComponent for AppModel {
                 sender.input_sender(),
                 |msg: PlaybackBarOutput| AppMsg::PlaybackBarOutput(msg),
             );
-        let pb_sender = pb.sender().clone();
         widgets
             .playback_bar_slot
             .append(pb.widget());
@@ -149,7 +148,6 @@ impl SimpleComponent for AppModel {
                 sender.input_sender(),
                 |msg: NavPaneOutput| AppMsg::NavPaneOutput(msg),
             );
-        let nav_sender = nav.sender().clone();
         widgets.nav_pane_slot.append(nav.widget());
 
         // -- Create ContentPane child --
@@ -159,7 +157,6 @@ impl SimpleComponent for AppModel {
                 sender.input_sender(),
                 |msg: ContentPaneOutput| AppMsg::ContentPaneOutput(msg),
             );
-        let content_sender = content.sender().clone();
         widgets.content_pane_slot.append(content.widget());
 
         // -- Setup playback engine --
@@ -174,9 +171,9 @@ impl SimpleComponent for AppModel {
             playback_rx: None,
             volume: 0.7,
             muted: false,
-            playback_bar: pb_sender,
-            nav_pane: nav_sender,
-            content_pane: content_sender,
+            playback_bar: pb,
+            nav_pane: nav,
+            content_pane: content,
             current_track_path: None,
         };
 
@@ -234,8 +231,8 @@ impl SimpleComponent for AppModel {
                         PlaybackEvent::Position { .. }
                         | PlaybackEvent::Tags { .. }
                         | PlaybackEvent::StateChanged(_) => {
-                            let _ = self.playback_bar.send(
-                                PlaybackBarMsg::PlaybackEvent(event.clone()),
+                            let _ = self.playback_bar.sender().send(
+                                PlaybackBarMsg::PlaybackEvent(event.clone())
                             );
                         }
                     }
@@ -247,17 +244,17 @@ impl SimpleComponent for AppModel {
                         match event {
                             LibraryEvent::SongsLoaded { .. }
                             | LibraryEvent::SongsAdded { .. } => {
-                                let _ = self.content_pane.send(
+                                let _ = self.content_pane.sender().send(
                                     ContentPaneMsg::SongsAdded,
                                 );
                             }
                             LibraryEvent::PlaylistsChanged => {
                                 let playlists =
                                     self.library_handle.get_playlists();
-                                let _ = self.nav_pane.send(
+                                let _ = self.nav_pane.sender().send(
                                     NavPaneMsg::SetPlaylists(playlists.clone()),
                                 );
-                                let _ = self.content_pane.send(
+                                let _ = self.content_pane.sender().send(
                                     ContentPaneMsg::SetPlaylists(playlists),
                                 );
                             }
@@ -332,6 +329,7 @@ impl SimpleComponent for AppModel {
                 NavPaneOutput::PageSelected(page) => {
                     let _ = self
                         .content_pane
+                        .sender()
                         .send(ContentPaneMsg::SetPage(page));
                 }
                 NavPaneOutput::CreatePlaylist(_name) => {
@@ -371,6 +369,7 @@ impl SimpleComponent for AppModel {
                     // Navigate to songs page and set search
                     let _ = self
                         .content_pane
+                        .sender()
                         .send(ContentPaneMsg::SetPage(Page::Songs));
                     // TODO: wire search text to ContentPane
                 }
@@ -398,7 +397,7 @@ impl AppModel {
             }
             self.queue.current = None;
             self.current_track_path = None;
-            let _ = self.content_pane.send(
+            let _ = self.content_pane.sender().send(
                 ContentPaneMsg::CurrentTrackPath(None),
             );
         }
@@ -412,6 +411,7 @@ impl AppModel {
         self.current_track_path = path.clone();
         let _ = self
             .content_pane
+            .sender()
             .send(ContentPaneMsg::CurrentTrackPath(path));
     }
 
