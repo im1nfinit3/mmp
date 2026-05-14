@@ -80,7 +80,7 @@ impl RepeatMode {
 // Messages
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AppMsg {
     PlayPause,
     Previous,
@@ -98,8 +98,12 @@ pub enum AppMsg {
     NavAlbums,
     NavArtists,
     NavQueue,
-    NavPlaylist(i64),
+    NavRecentlyAdded,
+    NavSettings,
+    NavPlaylistRow(i64),
     SearchChanged(String),
+    SearchAlbumsChanged(String),
+    SearchArtistsChanged(String),
     CreatePlaylist(String),
     DeletePlaylist(i64),
     RenamePlaylist(i64, String),
@@ -130,19 +134,22 @@ pub struct AppModel {
     pub current_playlist_id: i64,
     pub search_text: String,
     pub search_lowered: String,
+    pub search_albums_text: String,
+    pub search_albums_lowered: String,
+    pub search_artists_text: String,
+    pub search_artists_lowered: String,
     pub selected_artist: Option<String>,
     pub selected_album: Option<String>,
     pub tick: u64,
-
-    // Currently displayed song paths (in order shown in song_list_box)
+    pub recently_added_reverse: bool,
     pub displayed_song_paths: RefCell<Vec<PathBuf>>,
 
-    // Cached widget references (cloned from view_output!)
+    // Cached widget refs (cloned from view_output! or set in init)
     pub current_track_label: gtk4::Label,
     pub play_pause_button: gtk4::Button,
     pub shuffle_button: gtk4::Button,
     pub repeat_button: gtk4::Button,
-    pub volume_button: gtk4::Button,
+    pub mute_button: gtk4::Button,
     pub volume_scale: gtk4::Scale,
     pub track_progress_scale: gtk4::Scale,
     pub elapsed_time_label: gtk4::Label,
@@ -152,16 +159,27 @@ pub struct AppModel {
     pub albums_list_box: gtk4::ListBox,
     pub artists_list_box: gtk4::ListBox,
     pub queue_list_box: gtk4::ListBox,
-    pub playlist_list_box: gtk4::ListBox,
+    pub songs_search_entry: gtk4::SearchEntry,
+    pub albums_search_entry: gtk4::SearchEntry,
+    pub artists_search_entry: gtk4::SearchEntry,
+    pub navigation_list: gtk4::ListBox,
+    pub nav_recently_added_row: gtk4::ListBoxRow,
+    pub nav_albums_row: gtk4::ListBoxRow,
+    pub nav_artists_row: gtk4::ListBoxRow,
+    pub nav_songs_row: gtk4::ListBoxRow,
+    pub nav_queue_row: gtk4::ListBoxRow,
+    pub nav_playlists_header: gtk4::ListBoxRow,
+    pub nav_settings_row: gtk4::ListBoxRow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
+    RecentlyAdded,
     Songs,
     Albums,
     Artists,
     Queue,
-    Playlists,
+    Settings,
 }
 
 impl AppModel {
@@ -218,250 +236,188 @@ impl SimpleComponent for AppModel {
         #[root]
         window = gtk4::Window {
             set_default_size: (900, 600),
-            set_title: Some("MMP"),
+            set_title: Some("My Music Player (mmp)"),
 
             gtk4::Box {
                 set_orientation: gtk4::Orientation::Vertical,
+                set_css_classes: &["app-root"],
 
-                // ========================================================
-                // Playback Bar
-                // ========================================================
+                // ====================================================
+                // Playback Bar — [controls left] [info center] [vol right]
+                // ====================================================
                 #[name(playback_bar)]
                 gtk4::Box {
                     set_css_classes: &["playback-bar"],
-                    set_spacing: 10,
-                    set_margin_all: 4,
+                    set_spacing: 12,
 
-                    #[name(track_info_box)]
-                    gtk4::Box {
-                        set_orientation: gtk4::Orientation::Vertical,
-                        set_halign: gtk4::Align::Start,
-                        set_valign: gtk4::Align::Center,
-                        set_spacing: 2,
-
-                        #[name(current_track_label)]
-                        gtk4::Label {
-                            set_css_classes: &["track-info"],
-                            set_label: "No track playing",
-                            set_halign: gtk4::Align::Start,
-                            set_ellipsize: gtk4::pango::EllipsizeMode::End,
-                            set_max_width_chars: 30,
-                        },
-                    },
-
-                    #[name(progress_box)]
-                    gtk4::Box {
-                        set_orientation: gtk4::Orientation::Vertical,
-                        set_halign: gtk4::Align::Center,
-                        set_valign: gtk4::Align::Center,
-                        set_hexpand: true,
-                        set_spacing: 2,
-
-                        #[name(track_progress_scale)]
-                        gtk4::Scale {
-                            set_hexpand: true,
-                            set_draw_value: false,
-                            set_range: (0.0, 1.0),
-                            set_increments: (1.0, 10.0),
-                        },
-
-                        gtk4::Box {
-                            set_spacing: 6,
-                            #[name(elapsed_time_label)]
-                            gtk4::Label {
-                                set_css_classes: &["time-label"],
-                                set_label: "0:00",
-                            },
-                            gtk4::Box { set_hexpand: true },
-                            #[name(duration_label)]
-                            gtk4::Label {
-                                set_css_classes: &["time-label", "duration-label"],
-                                set_label: "0:00",
-                            },
-                        },
-                    },
-
+                    // -- Left: transport controls --
                     #[name(controls_box)]
                     gtk4::Box {
-                        set_halign: gtk4::Align::End,
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 4,
                         set_valign: gtk4::Align::Center,
-                        set_spacing: 6,
 
                         #[name(prev_button)]
                         gtk4::Button {
                             set_css_classes: &["playback-button"],
-                            set_label: "\u{23EE}",
+                            set_icon_name: "media-skip-backward-symbolic",
+                            set_tooltip_text: Some("Previous track"),
+                            set_valign: gtk4::Align::Center,
                             connect_clicked => AppMsg::Previous,
                         },
                         #[name(play_pause_button)]
                         gtk4::Button {
                             set_css_classes: &["playback-button"],
-                            set_label: "\u{25B6}",
+                            set_icon_name: "media-playback-start-symbolic",
+                            set_tooltip_text: Some("Play"),
+                            set_valign: gtk4::Align::Center,
                             connect_clicked => AppMsg::PlayPause,
                         },
                         #[name(next_button)]
                         gtk4::Button {
                             set_css_classes: &["playback-button"],
-                            set_label: "\u{23ED}",
+                            set_icon_name: "media-skip-forward-symbolic",
+                            set_tooltip_text: Some("Next track"),
+                            set_valign: gtk4::Align::Center,
                             connect_clicked => AppMsg::Next,
-                        },
-
-                        gtk4::Separator {
-                            set_orientation: gtk4::Orientation::Vertical,
-                            set_margin_start: 6,
-                            set_margin_end: 6,
-                        },
-
-                        #[name(shuffle_button)]
-                        gtk4::Button {
-                            set_css_classes: &["playback-button"],
-                            set_label: "\u{1F500}",
-                            connect_clicked => AppMsg::ShuffleToggled,
                         },
                         #[name(repeat_button)]
                         gtk4::Button {
                             set_css_classes: &["playback-button"],
-                            set_label: "\u{1F501}",
+                            set_icon_name: "media-playlist-repeat-symbolic",
+                            set_tooltip_text: Some("Repeat"),
+                            set_valign: gtk4::Align::Center,
                             connect_clicked => AppMsg::RepeatToggled,
                         },
-
-                        gtk4::Separator {
-                            set_orientation: gtk4::Orientation::Vertical,
-                            set_margin_start: 6,
-                            set_margin_end: 6,
-                        },
-
-                        #[name(volume_button)]
+                        #[name(shuffle_button)]
                         gtk4::Button {
                             set_css_classes: &["playback-button"],
-                            set_label: "\u{1F50A}",
-                            connect_clicked => AppMsg::MuteToggled,
+                            set_icon_name: "media-playlist-shuffle-symbolic",
+                            set_tooltip_text: Some("Shuffle"),
+                            set_valign: gtk4::Align::Center,
+                            connect_clicked => AppMsg::ShuffleToggled,
                         },
+                    },
+
+                    // -- Center: track info + progress --
+                    #[name(info_box)]
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Vertical,
+                        set_hexpand: true,
+                        set_spacing: 4,
+                        set_css_classes: &["track-info"],
+
+                        #[name(current_track_label)]
+                        gtk4::Label {
+                            set_label: "No track selected",
+                            set_halign: gtk4::Align::Start,
+                            set_ellipsize: gtk4::pango::EllipsizeMode::End,
+                            set_css_classes: &["track-info"],
+                        },
+
+                        #[name(progress_box)]
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 8,
+
+                            #[name(elapsed_time_label)]
+                            gtk4::Label {
+                                set_css_classes: &["time-label"],
+                                set_label: "0:00",
+                            },
+                            #[name(track_progress_scale)]
+                            gtk4::Scale {
+                                set_hexpand: true,
+                                set_draw_value: false,
+                                set_range: (0.0, 1.0),
+                                set_increments: (1.0, 10.0),
+                            },
+                            #[name(duration_label)]
+                            gtk4::Label {
+                                set_css_classes: &["time-label"],
+                                set_label: "0:00",
+                            },
+                        },
+                    },
+
+                    // -- Right: volume --
+                    #[name(volume_controls)]
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 8,
+                        set_valign: gtk4::Align::Center,
+
                         #[name(volume_scale)]
                         gtk4::Scale {
                             set_css_classes: &["volume-scale"],
-                            set_range: (0.0, 1.0),
+                            set_range: (0.0, 100.0),
                             set_draw_value: false,
+                            set_value: 70.0,
+                        },
+                        #[name(mute_button)]
+                        gtk4::Button {
+                            set_css_classes: &["volume-button"],
+                            set_icon_name: "audio-volume-medium-symbolic",
+                            set_tooltip_text: Some("Mute"),
+                            connect_clicked => AppMsg::MuteToggled,
                         },
                     },
                 },
 
-                // ========================================================
-                // Content Area: Nav sidebar + Stack
-                // ========================================================
+                gtk4::Separator {
+                    set_orientation: gtk4::Orientation::Horizontal,
+                },
+
+                // ====================================================
+                // Main shell: Nav sidebar + Content stack
+                // ====================================================
+                #[name(main_shell)]
                 gtk4::Box {
+                    set_orientation: gtk4::Orientation::Horizontal,
                     set_hexpand: true,
                     set_vexpand: true,
-                    set_spacing: 0,
+                    set_css_classes: &["main-shell"],
 
+                    // -- Navigation Pane --
                     #[name(nav_pane)]
-                    gtk4::ScrolledWindow {
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Vertical,
                         set_css_classes: &["nav-pane"],
-                        set_hscrollbar_policy: gtk4::PolicyType::Never,
 
                         #[name(navigation_list)]
                         gtk4::ListBox {
                             set_css_classes: &["navigation-list"],
+                            set_vexpand: true,
 
-                            #[name(nav_header_library)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-header"],
-                                set_selectable: false,
-                                set_activatable: false,
-                            },
-                            #[name(nav_songs_row)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-sub-row"],
-                            },
+                            #[name(nav_recently_added_row)]
+                            gtk4::ListBoxRow {},
                             #[name(nav_albums_row)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-sub-row"],
-                            },
+                            gtk4::ListBoxRow {},
                             #[name(nav_artists_row)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-sub-row"],
-                            },
+                            gtk4::ListBoxRow {},
+                            #[name(nav_songs_row)]
+                            gtk4::ListBoxRow {},
+                            #[name(nav_queue_row)]
+                            gtk4::ListBoxRow {},
 
-                            #[name(nav_header_playback)]
+                            #[name(nav_playlists_header)]
                             gtk4::ListBoxRow {
                                 set_css_classes: &["nav-header"],
                                 set_selectable: false,
                                 set_activatable: false,
                             },
-                            #[name(nav_queue_row)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-sub-row"],
-                            },
-                            #[name(nav_playlists_row)]
-                            gtk4::ListBoxRow {
-                                set_css_classes: &["nav-sub-row"],
-                            },
+
+                            #[name(nav_settings_row)]
+                            gtk4::ListBoxRow {},
                         },
                     },
 
-                    #[name(content_box)]
-                    gtk4::Box {
-                        set_orientation: gtk4::Orientation::Vertical,
+                    // -- Content Stack --
+                    #[name(content_stack)]
+                    gtk4::Stack {
                         set_hexpand: true,
                         set_vexpand: true,
-                        set_css_classes: &["content-page"],
-
-                        #[name(search_entry)]
-                        gtk4::SearchEntry {
-                            set_placeholder_text: Some("Search library..."),
-                            set_margin_bottom: 12,
-                        },
-
-                        #[name(content_stack)]
-                        gtk4::Stack {
-                            set_hexpand: true,
-                            set_vexpand: true,
-
-                            #[name(songs_page)]
-                            gtk4::ScrolledWindow {
-                                set_hscrollbar_policy: gtk4::PolicyType::Never,
-                                #[name(song_list_box)]
-                                gtk4::ListBox {
-                                    set_css_classes: &["library-list"],
-                                },
-                            },
-
-                            #[name(albums_page)]
-                            gtk4::ScrolledWindow {
-                                set_hscrollbar_policy: gtk4::PolicyType::Never,
-                                #[name(albums_list_box)]
-                                gtk4::ListBox {
-                                    set_css_classes: &["library-list"],
-                                },
-                            },
-
-                            #[name(artists_page)]
-                            gtk4::ScrolledWindow {
-                                set_hscrollbar_policy: gtk4::PolicyType::Never,
-                                #[name(artists_list_box)]
-                                gtk4::ListBox {
-                                    set_css_classes: &["library-list"],
-                                },
-                            },
-
-                            #[name(queue_page)]
-                            gtk4::ScrolledWindow {
-                                set_hscrollbar_policy: gtk4::PolicyType::Never,
-                                #[name(queue_list_box)]
-                                gtk4::ListBox {
-                                    set_css_classes: &["library-list"],
-                                },
-                            },
-
-                            #[name(playlists_page)]
-                            gtk4::ScrolledWindow {
-                                set_hscrollbar_policy: gtk4::PolicyType::Never,
-                                #[name(playlist_list_box)]
-                                gtk4::ListBox {
-                                    set_css_classes: &["library-list"],
-                                },
-                            },
-                        },
+                        set_css_classes: &["content-stack"],
                     },
                 },
             },
@@ -484,51 +440,226 @@ impl SimpleComponent for AppModel {
 
         let widgets = view_output!();
 
-        // Set stack page names
-        widgets.content_stack.add_titled(&widgets.songs_page, Some("songs"), "Songs");
-        widgets.content_stack.add_titled(&widgets.albums_page, Some("albums"), "Albums");
-        widgets.content_stack.add_titled(&widgets.artists_page, Some("artists"), "Artists");
-        widgets.content_stack.add_titled(&widgets.queue_page, Some("queue"), "Queue");
-        widgets.content_stack.add_titled(&widgets.playlists_page, Some("playlists"), "Playlists");
+        // -- Create content page widgets locally --
+        let (songs_page, songs_search_entry, songs_list_box) =
+            build_library_panel("Search songs");
+        let (albums_page, albums_search_entry, albums_list_box) =
+            build_library_panel("Search albums");
+        let (artists_page, artists_search_entry, artists_list_box) =
+            build_library_panel("Search artists");
 
-        // Build model with widget refs from view_output!
+        let queue_list_box = gtk4::ListBox::new();
+        queue_list_box.add_css_class("library-list");
+        queue_list_box.add_css_class("boxed-list");
+        let queue_page = {
+            let page_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+            page_box.add_css_class("content-page");
+            let scrolled = gtk4::ScrolledWindow::new();
+            scrolled.set_vexpand(true);
+            scrolled.set_child(Some(&queue_list_box));
+            page_box.append(&scrolled);
+            page_box
+        };
+
+        let settings_page = {
+            let page_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+            page_box.add_css_class("content-page");
+            let cb = gtk4::CheckButton::with_label("Scan music folder on startup");
+            page_box.append(&cb);
+            page_box
+        };
+
+        widgets.content_stack.add_titled(&songs_page, Some("songs-view"), "Songs");
+        widgets.content_stack.add_titled(&albums_page, Some("albums"), "Albums");
+        widgets.content_stack.add_titled(&artists_page, Some("artists"), "Artists");
+        widgets.content_stack.add_titled(&queue_page, Some("queue"), "Queue");
+        widgets.content_stack.add_titled(&settings_page, Some("settings"), "Settings");
+
+        // -- Wire signals (before model consumes local variables) --
+        {
+            let s = sender.clone();
+            songs_search_entry.connect_search_changed(move |entry| {
+                s.input(AppMsg::SearchChanged(entry.text().to_string()));
+            });
+        }
+        {
+            let s = sender.clone();
+            albums_search_entry.connect_search_changed(move |entry| {
+                s.input(AppMsg::SearchAlbumsChanged(entry.text().to_string()));
+            });
+        }
+        {
+            let s = sender.clone();
+            artists_search_entry.connect_search_changed(move |entry| {
+                s.input(AppMsg::SearchArtistsChanged(entry.text().to_string()));
+            });
+        }
+        // Song list double-click
+        {
+            let s = sender.clone();
+            songs_list_box.connect_row_activated(move |_, _row| {
+                s.input(AppMsg::Tick); // placeholder
+            });
+        }
+        // Albums list click → filter
+        {
+            let s = sender.clone();
+            let list = albums_list_box.clone();
+            list.connect_row_activated(move |_, row| {
+                if let Some(child) = row.child() {
+                    if let Some(label) = child.downcast_ref::<gtk4::Label>() {
+                        s.input(AppMsg::SearchChanged(label.label().to_string()));
+                        s.input(AppMsg::NavSongs);
+                    }
+                }
+            });
+        }
+        // Artists list click → filter
+        {
+            let s = sender.clone();
+            let list = artists_list_box.clone();
+            list.connect_row_activated(move |_, row| {
+                if let Some(child) = row.child() {
+                    if let Some(label) = child.downcast_ref::<gtk4::Label>() {
+                        s.input(AppMsg::SearchChanged(label.label().to_string()));
+                        s.input(AppMsg::NavSongs);
+                    }
+                }
+            });
+        }
+        // Volume scale
+        {
+            let s = sender.clone();
+            widgets.volume_scale.connect_change_value(move |_, _, value| {
+                s.input(AppMsg::VolumeChanged(value / 100.0));
+                gtk4::glib::Propagation::Proceed
+            });
+        }
+        // Track progress scale
+        {
+            let s = sender.clone();
+            widgets.track_progress_scale.connect_change_value(move |scale, _, value| {
+                let seconds = value * scale.adjustment().upper();
+                s.input(AppMsg::Seek(seconds));
+                gtk4::glib::Propagation::Proceed
+            });
+        }
+
+        // -- Build model --
         let mut model = AppModel {
             library: Vec::new(),
             library_by_path: HashMap::new(),
             queue: QueueState::new(),
             playback: None,
             playback_rx: None,
-            volume: 1.0,
+            volume: 0.7,
             muted: false,
             library_db: None,
             playlists_db: None,
             playlists: Vec::new(),
-            current_page: Page::Songs,
+            current_page: Page::RecentlyAdded,
             current_playlist_id: 0,
             search_text: String::new(),
             search_lowered: String::new(),
+            search_albums_text: String::new(),
+            search_albums_lowered: String::new(),
+            search_artists_text: String::new(),
+            search_artists_lowered: String::new(),
             selected_artist: None,
             selected_album: None,
             tick: 0,
+            recently_added_reverse: true,
             displayed_song_paths: RefCell::new(Vec::new()),
             current_track_label: widgets.current_track_label.clone(),
             play_pause_button: widgets.play_pause_button.clone(),
             shuffle_button: widgets.shuffle_button.clone(),
             repeat_button: widgets.repeat_button.clone(),
-            volume_button: widgets.volume_button.clone(),
+            mute_button: widgets.mute_button.clone(),
             volume_scale: widgets.volume_scale.clone(),
             track_progress_scale: widgets.track_progress_scale.clone(),
             elapsed_time_label: widgets.elapsed_time_label.clone(),
             duration_label: widgets.duration_label.clone(),
             content_stack: widgets.content_stack.clone(),
-            song_list_box: widgets.song_list_box.clone(),
-            albums_list_box: widgets.albums_list_box.clone(),
-            artists_list_box: widgets.artists_list_box.clone(),
-            queue_list_box: widgets.queue_list_box.clone(),
-            playlist_list_box: widgets.playlist_list_box.clone(),
+            song_list_box: songs_list_box,
+            albums_list_box: albums_list_box,
+            artists_list_box: artists_list_box,
+            queue_list_box: queue_list_box,
+            songs_search_entry: songs_search_entry,
+            albums_search_entry: albums_search_entry,
+            artists_search_entry: artists_search_entry,
+            navigation_list: widgets.navigation_list.clone(),
+            nav_recently_added_row: widgets.nav_recently_added_row.clone(),
+            nav_albums_row: widgets.nav_albums_row.clone(),
+            nav_artists_row: widgets.nav_artists_row.clone(),
+            nav_songs_row: widgets.nav_songs_row.clone(),
+            nav_queue_row: widgets.nav_queue_row.clone(),
+            nav_playlists_header: widgets.nav_playlists_header.clone(),
+            nav_settings_row: widgets.nav_settings_row.clone(),
         };
 
-        // Open databases, load cached songs
+        // -- Set up navigation rows --
+        build_nav_row(&widgets.nav_recently_added_row, "Recently added", "songs-view");
+        build_nav_row(&widgets.nav_albums_row, "Albums", "albums");
+        build_nav_row(&widgets.nav_artists_row, "Artists", "artists");
+        build_nav_row(&widgets.nav_songs_row, "Songs", "songs-view");
+        build_nav_row(&widgets.nav_queue_row, "Queue", "queue");
+        {
+            let label = gtk4::Label::builder()
+                .css_classes(["row-label"]).label("PLAYLISTS")
+                .halign(gtk4::Align::Start).build();
+            widgets.nav_playlists_header.set_child(Some(&label));
+        }
+        build_nav_row(&widgets.nav_settings_row, "Settings", "settings");
+
+        // Nav row activation signals
+        for (row, msg) in [
+            (&widgets.nav_recently_added_row, AppMsg::NavRecentlyAdded),
+            (&widgets.nav_albums_row, AppMsg::NavAlbums),
+            (&widgets.nav_artists_row, AppMsg::NavArtists),
+            (&widgets.nav_songs_row, AppMsg::NavSongs),
+            (&widgets.nav_queue_row, AppMsg::NavQueue),
+            (&widgets.nav_settings_row, AppMsg::NavSettings),
+        ] {
+            let s = sender.clone();
+            let m = msg;
+            row.connect_activate(move |_| { s.input(m.clone()); });
+        }
+
+        // Select "Recently added" by default
+        widgets.navigation_list.select_row(Some(&widgets.nav_recently_added_row));
+
+        // -- Volume revealer: slider hidden until hover, slides out left --
+        {
+            let revealer = gtk4::Revealer::new();
+            revealer.set_transition_type(gtk4::RevealerTransitionType::SlideLeft);
+            revealer.set_reveal_child(false);
+
+            // Reparent: remove volume_scale from volume_controls, wrap in revealer
+            widgets.volume_controls.remove(&widgets.volume_scale);
+            revealer.set_child(Some(&widgets.volume_scale));
+            widgets.volume_controls.prepend(&revealer);
+
+            // Motion controller on the volume_controls box
+            let motion = gtk4::EventControllerMotion::new();
+            let r1 = revealer.clone();
+            motion.connect_enter(move |_, _x, _y| {
+                r1.set_reveal_child(true);
+            });
+            let r2 = revealer.clone();
+            motion.connect_leave(move |_| {
+                r2.set_reveal_child(false);
+            });
+            widgets.volume_controls.add_controller(motion);
+        }
+
+        // Load current_track_label bold via Pango attributes
+        {
+            let attrs = gtk4::pango::AttrList::new();
+            attrs.insert(gtk4::pango::AttrInt::new_weight(gtk4::pango::Weight::Bold));
+            widgets.current_track_label.set_attributes(Some(&attrs));
+        }
+
+        // -- Open databases, load cached songs --
         if let Ok(conn) = db::open_library_db() {
             if let Ok(songs) = db::get_all_songs(&conn) {
                 for song in songs {
@@ -538,7 +669,6 @@ impl SimpleComponent for AppModel {
             }
             model.library_db = Some(conn);
         }
-
         if let Ok(conn) = db::open_playlists_db() {
             if let Ok(pls) = db::get_playlists(&conn) {
                 model.playlists = pls;
@@ -546,112 +676,27 @@ impl SimpleComponent for AppModel {
             model.playlists_db = Some(conn);
         }
 
-        // Setup playback engine
+        // -- Setup playback engine --
         let (tx, rx) = mpsc::channel();
         let mut playback = Playback::new(tx);
         playback.set_volume(model.volume);
         model.playback = Some(playback);
         model.playback_rx = Some(rx);
 
-        // Populate initial lists
+        // -- Populate initial lists --
         model.rebuild_song_list();
         model.rebuild_albums_list();
         model.rebuild_artists_list();
-        model.rebuild_playlists_list();
+        model.rebuild_playlists_nav();
 
-        // Wire up event handlers
-        let sender_clone = sender.clone();
-        widgets.search_entry.connect_search_changed(move |entry| {
-            sender_clone.input(AppMsg::SearchChanged(entry.text().to_string()));
-        });
-
-        let sender_clone = sender.clone();
-        widgets.volume_scale.connect_change_value(move |_, _, value| {
-            sender_clone.input(AppMsg::VolumeChanged(value));
-            gtk4::glib::Propagation::Proceed
-        });
-
-        let sender_clone = sender.clone();
-        widgets.track_progress_scale.connect_change_value(move |scale, _, value| {
-            let seconds = value * scale.adjustment().upper();
-            sender_clone.input(AppMsg::Seek(seconds));
-            gtk4::glib::Propagation::Proceed
-        });
-
-        // Start periodic tick for playback event polling + UI updates
+        // -- Periodic tick --
         let sender_clone = sender.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             sender_clone.input(AppMsg::Tick);
             glib::ControlFlow::Continue
         });
 
-        // -- Set up navigation sidebar --
-        // Header labels
-        let lib_label = gtk4::Label::builder()
-            .css_classes(["nav-header-label"]).label("Library")
-            .halign(gtk4::Align::Start).margin_start(12).margin_top(12).build();
-        widgets.nav_header_library.set_child(Some(&lib_label));
-
-        let pb_label = gtk4::Label::builder()
-            .css_classes(["nav-header-label"]).label("Playback")
-            .halign(gtk4::Align::Start).margin_start(12).margin_top(12).build();
-        widgets.nav_header_playback.set_child(Some(&pb_label));
-
-        // Nav row labels
-        for (row, text, msg) in [
-            (&widgets.nav_songs_row, "Songs", AppMsg::NavSongs),
-            (&widgets.nav_albums_row, "Albums", AppMsg::NavAlbums),
-            (&widgets.nav_artists_row, "Artists", AppMsg::NavArtists),
-            (&widgets.nav_queue_row, "Queue", AppMsg::NavQueue),
-        ] {
-            let label = gtk4::Label::builder()
-                .css_classes(["row-label"]).label(text)
-                .halign(gtk4::Align::Start).build();
-            row.set_child(Some(&label));
-        }
-        // Playlists row
-        {
-            let label = gtk4::Label::builder()
-                .css_classes(["row-label"]).label("Playlists")
-                .halign(gtk4::Align::Start).build();
-            widgets.nav_playlists_row.set_child(Some(&label));
-        }
-
-        // Connect row activation signals
-        {
-            let s = sender.clone();
-            widgets.nav_songs_row.connect_activate(move |_| { s.input(AppMsg::NavSongs); });
-        }
-        {
-            let s = sender.clone();
-            widgets.nav_albums_row.connect_activate(move |_| { s.input(AppMsg::NavAlbums); });
-        }
-        {
-            let s = sender.clone();
-            widgets.nav_artists_row.connect_activate(move |_| { s.input(AppMsg::NavArtists); });
-        }
-        {
-            let s = sender.clone();
-            widgets.nav_queue_row.connect_activate(move |_| { s.input(AppMsg::NavQueue); });
-        }
-        {
-            let s = sender.clone();
-            widgets.nav_playlists_row.connect_activate(move |_| { s.input(AppMsg::NavPlaylist(0)); });
-        }
-
-        // -- Song list: double-click to play --
-        {
-            let s = sender.clone();
-            widgets.song_list_box.connect_row_activated(move |list, row| {
-                let idx = row.index() as usize;
-                // Access displayed paths via a simple index lookup
-                // We don't have direct access to model here, so we check
-                // the row's child label text and match against library
-                // For now, just do nothing — we'll add a proper msg later
-            });
-        }
-
-        // Start directory scan in background
+        // -- Directory scan --
         let sender_clone = sender.clone();
         std::thread::spawn(move || {
             scan_directory(sender_clone);
@@ -770,13 +815,33 @@ impl SimpleComponent for AppModel {
             AppMsg::NavAlbums => { self.current_page = Page::Albums; }
             AppMsg::NavArtists => { self.current_page = Page::Artists; }
             AppMsg::NavQueue => { self.current_page = Page::Queue; }
-            AppMsg::NavPlaylist(id) => {
+            AppMsg::NavRecentlyAdded => {
+                self.current_page = Page::RecentlyAdded;
+                self.current_playlist_id = 0;
+            }
+            AppMsg::NavSettings => { self.current_page = Page::Settings; }
+            AppMsg::NavPlaylistRow(id) => {
                 self.current_playlist_id = id;
                 self.current_page = Page::Songs;
+                // Load playlist songs into song view
+                if let Some(ref conn) = self.playlists_db {
+                    if let Ok(songs) = db::get_playlist_songs(conn, id) {
+                        // For now, just switch to songs view
+                        // TODO: set base list to playlist songs
+                    }
+                }
             }
             AppMsg::SearchChanged(text) => {
                 self.search_text = text.clone();
                 self.search_lowered = text.to_lowercase();
+            }
+            AppMsg::SearchAlbumsChanged(text) => {
+                self.search_albums_text = text.clone();
+                self.search_albums_lowered = text.to_lowercase();
+            }
+            AppMsg::SearchArtistsChanged(text) => {
+                self.search_artists_text = text.clone();
+                self.search_artists_lowered = text.to_lowercase();
             }
 
             AppMsg::CreatePlaylist(_) => {}
@@ -829,16 +894,83 @@ impl AppModel {
         }
     }
 
+    fn sync_ui(&self) {
+        let name = match self.current_page {
+            Page::RecentlyAdded | Page::Songs => "songs-view",
+            Page::Albums => "albums",
+            Page::Artists => "artists",
+            Page::Queue => "queue",
+            Page::Settings => "settings",
+        };
+        self.content_stack.set_visible_child_name(name);
+
+        if let Some(song) = self.current_song() {
+            self.current_track_label.set_label(&song.label());
+        } else {
+            self.current_track_label.set_label("No track selected");
+        }
+
+        if self.queue.shuffle {
+            self.shuffle_button.set_css_classes(&["playback-button", "active-control"]);
+        } else {
+            self.shuffle_button.set_css_classes(&["playback-button"]);
+        }
+        if self.queue.repeat != RepeatMode::Off {
+            self.repeat_button.set_css_classes(&["playback-button", "active-control"]);
+        } else {
+            self.repeat_button.set_css_classes(&["playback-button"]);
+        }
+
+        self.volume_scale.set_value(self.volume * 100.0);
+        let icon = if self.muted { "audio-volume-muted-symbolic" } else { "audio-volume-medium-symbolic" };
+        self.mute_button.set_icon_name(icon);
+
+        match self.current_page {
+            Page::Songs | Page::RecentlyAdded => self.rebuild_song_list(),
+            Page::Albums => self.rebuild_albums_list(),
+            Page::Artists => self.rebuild_artists_list(),
+            Page::Queue => self.rebuild_queue_list(),
+            Page::Settings => {},
+        }
+    }
+
     fn rebuild_song_list(&self) {
         self.song_list_box.remove_all();
         let mut paths = self.displayed_song_paths.borrow_mut();
         paths.clear();
-        for idx in self.filtered_indices() {
+        let indices = self.filtered_indices();
+        for &idx in &indices {
             let song = &self.library[idx];
+            let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+            row_box.add_css_class("song-row");
+
+            let indicator = gtk4::Image::new();
+            row_box.append(&indicator);
+
+            let title_label = gtk4::Label::builder()
+                .label(&song.title).halign(gtk4::Align::Start)
+                .hexpand(true).ellipsize(gtk4::pango::EllipsizeMode::End).build();
+            row_box.append(&title_label);
+
+            let artist_label = gtk4::Label::builder()
+                .label(&song.artist).css_classes(["dim-label"])
+                .ellipsize(gtk4::pango::EllipsizeMode::Start)
+                .max_width_chars(15).build();
+            row_box.append(&artist_label);
+
+            let album_label = gtk4::Label::builder()
+                .label(&song.album).css_classes(["dim-label"])
+                .ellipsize(gtk4::pango::EllipsizeMode::Start)
+                .max_width_chars(15).build();
+            row_box.append(&album_label);
+
+            let d_label = gtk4::Label::builder()
+                .label(&song.duration_str)
+                .css_classes(["dim-label", "duration-label"]).build();
+            row_box.append(&d_label);
+
             let row = gtk4::ListBoxRow::new();
-            row.set_child(Some(&gtk4::Label::builder()
-                .css_classes(["song-row"]).label(&song.label())
-                .halign(gtk4::Align::Start).build()));
+            row.set_child(Some(&row_box));
             paths.push(song.path.clone());
             self.song_list_box.append(&row);
         }
@@ -846,10 +978,18 @@ impl AppModel {
 
     fn rebuild_albums_list(&self) {
         self.albums_list_box.remove_all();
+        let mut seen = std::collections::BTreeSet::new();
         for album in self.unique_albums() {
+            let lowered = album.to_lowercase();
+            if !self.search_albums_lowered.is_empty()
+                && !lowered.contains(&self.search_albums_lowered) {
+                continue;
+            }
+            if seen.contains(&album) { continue; }
+            seen.insert(album.clone());
             let row = gtk4::ListBoxRow::new();
             row.set_child(Some(&gtk4::Label::builder()
-                .css_classes(["song-row"]).label(&album)
+                .css_classes(["row-label"]).label(&album)
                 .halign(gtk4::Align::Start).build()));
             self.albums_list_box.append(&row);
         }
@@ -857,23 +997,48 @@ impl AppModel {
 
     fn rebuild_artists_list(&self) {
         self.artists_list_box.remove_all();
+        let mut seen = std::collections::BTreeSet::new();
         for artist in self.unique_artists() {
+            let lowered = artist.to_lowercase();
+            if !self.search_artists_lowered.is_empty()
+                && !lowered.contains(&self.search_artists_lowered) {
+                continue;
+            }
+            if seen.contains(&artist) { continue; }
+            seen.insert(artist.clone());
             let row = gtk4::ListBoxRow::new();
             row.set_child(Some(&gtk4::Label::builder()
-                .css_classes(["song-row"]).label(&artist)
+                .css_classes(["row-label"]).label(&artist)
                 .halign(gtk4::Align::Start).build()));
             self.artists_list_box.append(&row);
         }
     }
 
-    fn rebuild_playlists_list(&self) {
-        self.playlist_list_box.remove_all();
+    fn rebuild_playlists_nav(&self) {
+        let mut to_remove = Vec::new();
+        for i in 0.. {
+            let row = self.navigation_list.row_at_index(i);
+            if row.is_none() { break; }
+            let row = row.unwrap();
+            if row.has_css_class("nav-sub-row") && row != self.nav_playlists_header {
+                to_remove.push(i);
+            }
+        }
+        for i in to_remove.into_iter().rev() {
+            if let Some(row) = self.navigation_list.row_at_index(i) {
+                self.navigation_list.remove(&row);
+            }
+        }
+        let header_idx = self.nav_playlists_header.index();
+        let mut pos = header_idx + 1;
         for pl in &self.playlists {
             let row = gtk4::ListBoxRow::new();
+            row.add_css_class("nav-sub-row");
             row.set_child(Some(&gtk4::Label::builder()
-                .css_classes(["song-row"]).label(&pl.name)
+                .css_classes(["row-label"]).label(&pl.name)
                 .halign(gtk4::Align::Start).build()));
-            self.playlist_list_box.append(&row);
+            self.navigation_list.insert(&row, pos);
+            pos += 1;
         }
     }
 
@@ -889,44 +1054,10 @@ impl AppModel {
             row.set_child(Some(&gtk4::Label::builder()
                 .css_classes(["song-row"]).label(&label)
                 .halign(gtk4::Align::Start).build()));
+            if Some(i) == self.queue.current {
+                row.add_css_class("current-track");
+            }
             self.queue_list_box.append(&row);
-        }
-    }
-
-    fn sync_ui(&self) {
-        let name = match self.current_page {
-            Page::Songs => "songs", Page::Albums => "albums",
-            Page::Artists => "artists", Page::Queue => "queue",
-            Page::Playlists => "playlists",
-        };
-        self.content_stack.set_visible_child_name(name);
-
-        if let Some(song) = self.current_song() {
-            self.current_track_label.set_label(&song.label());
-        } else {
-            self.current_track_label.set_label("No track playing");
-        }
-
-        if self.queue.shuffle {
-            self.shuffle_button.set_css_classes(&["playback-button", "active-control"]);
-        } else {
-            self.shuffle_button.set_css_classes(&["playback-button"]);
-        }
-        if self.queue.repeat != RepeatMode::Off {
-            self.repeat_button.set_css_classes(&["playback-button", "active-control"]);
-        } else {
-            self.repeat_button.set_css_classes(&["playback-button"]);
-        }
-
-        self.volume_scale.set_value(self.volume);
-        self.volume_button.set_label(if self.muted { "\u{1F507}" } else { "\u{1F50A}" });
-
-        match self.current_page {
-            Page::Songs => self.rebuild_song_list(),
-            Page::Albums => self.rebuild_albums_list(),
-            Page::Artists => self.rebuild_artists_list(),
-            Page::Queue => self.rebuild_queue_list(),
-            Page::Playlists => self.rebuild_playlists_list(),
         }
     }
 }
@@ -938,9 +1069,37 @@ fn format_time(seconds: f64) -> String {
     format!("{}:{:02}", mins, secs)
 }
 
-// ---------------------------------------------------------------------------
-// Directory scanner
-// ---------------------------------------------------------------------------
+fn build_library_panel(placeholder: &str) -> (gtk4::Box, gtk4::SearchEntry, gtk4::ListBox) {
+    let page_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    page_box.add_css_class("content-page");
+
+    let panel_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    panel_box.set_vexpand(true);
+    panel_box.add_css_class("library-panel");
+    page_box.append(&panel_box);
+
+    let search = gtk4::SearchEntry::new();
+    search.set_placeholder_text(Some(placeholder));
+    panel_box.append(&search);
+
+    let list_box = gtk4::ListBox::new();
+    list_box.add_css_class("library-list");
+    list_box.add_css_class("boxed-list");
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_child(Some(&list_box));
+    panel_box.append(&scrolled);
+
+    (page_box, search, list_box)
+}
+
+fn build_nav_row(row: &gtk4::ListBoxRow, label_text: &str, _page_name: &str) {
+    let label = gtk4::Label::builder()
+        .css_classes(["row-label"]).label(label_text)
+        .halign(gtk4::Align::Start).build();
+    row.set_child(Some(&label));
+}
 
 fn scan_directory(sender: ComponentSender<AppModel>) {
     let music_dir = dirs::audio_dir().unwrap_or_else(|| {
