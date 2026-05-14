@@ -292,23 +292,23 @@ impl SimpleComponent for ContentPane {
                 self.current_page = page;
                 self.current_playlist_id = 0;
                 self.dirty_lists = true;
-                self.sync_lists();
             }
             ContentPaneMsg::SetPlaylists(playlists) => {
                 self.playlists = playlists;
             }
             ContentPaneMsg::SongsAdded | ContentPaneMsg::SongsLoaded => {
                 self.dirty_lists = true;
-                self.sync_lists();
             }
             ContentPaneMsg::CurrentTrackPath(path) => {
                 self.current_track_path = path;
                 self.dirty_lists = true;
-                self.sync_lists();
             }
             ContentPaneMsg::PlaybackEvent(_event) => {
                 // Handled for current-track highlighting if needed
             }
+        }
+        if self.dirty_lists {
+            self.sync_lists();
         }
     }
 }
