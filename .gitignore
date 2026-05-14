@@ -148,3 +148,7 @@ Testing/
 .cache/
 
 .codex
+
+
+# rust
+target

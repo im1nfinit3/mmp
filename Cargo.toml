@@ -1,0 +1,24 @@
+[package]
+name = "mmp"
+version = "0.1.0"
+edition = "2024"
+description = "A GTK4 music player (Rust port)"
+
+[dependencies]
+# GTK4 + Relm4 (Elm-inspired GUI framework)
+gtk4 = { version = "0.9", package = "gtk4" }
+glib = "0.20"
+relm4 = { version = "0.9", features = ["macros"] }
+relm4-components = "0.9"
+
+# GStreamer for audio playback and metadata
+gstreamer = "0.23"
+gstreamer-pbutils = "0.23"
+
+# SQLite for library and playlists
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Utilities
+walkdir = "2"
+rand = "0.8"
+dirs = "5"
