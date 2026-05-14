@@ -1,7 +1,9 @@
+//! SQLite persistence for the music library and playlists.
+
 use rusqlite::{params, Connection, Result as SqlResult};
 use std::path::{Path, PathBuf};
 
-use crate::app::Song;
+use super::song::Song;
 
 /// A named playlist from the database.
 #[derive(Clone, Debug)]

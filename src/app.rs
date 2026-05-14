@@ -1,7 +1,6 @@
 //! Application state, data model, and Relm4 top-level component.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -9,72 +8,11 @@ use gtk4::prelude::*;
 use relm4::prelude::*;
 use relm4::RelmRemoveAllExt;
 
-use crate::db;
-use crate::playback::{self, Playback, PlaybackEvent, PlaybackState, QueueState};
-
-// ---------------------------------------------------------------------------
-// Data model
-// ---------------------------------------------------------------------------
-
-/// A single song/track in the library.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Song {
-    pub path: PathBuf,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub duration_str: String,
-}
-
-impl Song {
-    pub fn new(path: PathBuf) -> Self {
-        let filename = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-        Self {
-            path,
-            title: filename,
-            artist: String::from("Unknown Artist"),
-            album: String::from("Unknown Album"),
-            duration_str: String::new(),
-        }
-    }
-
-    pub fn label(&self) -> String {
-        if self.artist.is_empty() || self.artist == "Unknown Artist" {
-            self.title.clone()
-        } else {
-            format!("{} — {}", self.title, self.artist)
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RepeatMode {
-    Off,
-    All,
-    One,
-}
-
-impl RepeatMode {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::All,
-            Self::All => Self::One,
-            Self::One => Self::Off,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Repeat: Off",
-            Self::All => "Repeat: All",
-            Self::One => "Repeat: One",
-        }
-    }
-}
+use crate::library::scan;
+use crate::library::song::{RepeatMode, Song};
+use crate::library::{LibraryEvent, LibraryHandle};
+use crate::playback::{Playback, PlaybackEvent, QueueState};
+use crate::ui::widgets;
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -111,6 +49,7 @@ pub enum AppMsg {
     ScanStarted,
     ScanComplete(usize),
     ScanAddSong(PathBuf),
+    BatchScan(Vec<PathBuf>),
     ScanError(String),
     Tick,
 }
@@ -120,16 +59,13 @@ pub enum AppMsg {
 // ---------------------------------------------------------------------------
 
 pub struct AppModel {
-    pub library: Vec<Song>,
-    pub library_by_path: HashMap<PathBuf, usize>,
+    pub library_handle: LibraryHandle,
+    pub library_rx: Option<mpsc::Receiver<LibraryEvent>>,
     pub queue: QueueState,
     pub playback: Option<Playback>,
     pub playback_rx: Option<mpsc::Receiver<PlaybackEvent>>,
     pub volume: f64,
     pub muted: bool,
-    pub library_db: Option<rusqlite::Connection>,
-    pub playlists_db: Option<rusqlite::Connection>,
-    pub playlists: Vec<db::Playlist>,
     pub current_page: Page,
     pub current_playlist_id: i64,
     pub search_text: String,
@@ -143,6 +79,10 @@ pub struct AppModel {
     pub tick: u64,
     pub recently_added_reverse: bool,
     pub displayed_song_paths: RefCell<Vec<PathBuf>>,
+    /// True when the visible list is stale and needs a rebuild.
+    pub dirty_lists: bool,
+    /// Songs discovered by the scanner, waiting to be added to the library.
+    pub scan_pending: std::collections::VecDeque<PathBuf>,
 
     // Cached widget refs (cloned from view_output! or set in init)
     pub current_track_label: gtk4::Label,
@@ -183,42 +123,43 @@ pub enum Page {
 }
 
 impl AppModel {
-    pub fn current_song(&self) -> Option<&Song> {
+    pub fn current_song(&self) -> Option<Song> {
         let idx = self.queue.current?;
         let path = self.queue.tracks.get(idx)?;
-        self.library_by_path.get(path).map(|&lib_idx| &self.library[lib_idx])
+        let songs = self.library_handle.get_all_songs();
+        songs.into_iter().find(|s| s.path == *path)
     }
 
-    pub fn filtered_indices(&self) -> Vec<usize> {
-        self.library.iter().enumerate().filter(|(_, song)| {
-            if !self.search_lowered.is_empty() {
+    pub fn filtered_songs(&self) -> Vec<Song> {
+        let search = self.search_lowered.clone();
+        let artist = self.selected_artist.clone();
+        let album = self.selected_album.clone();
+        let filter: Box<dyn Fn(&Song) -> bool + Send + 'static> = Box::new(move |song| {
+            if !search.is_empty() {
                 let tl = song.title.to_lowercase();
                 let al = song.artist.to_lowercase();
                 let bl = song.album.to_lowercase();
-                if !tl.contains(&self.search_lowered) && !al.contains(&self.search_lowered) && !bl.contains(&self.search_lowered) {
+                if !tl.contains(&search) && !al.contains(&search) && !bl.contains(&search) {
                     return false;
                 }
             }
-            if let Some(ref a) = self.selected_artist {
+            if let Some(ref a) = artist {
                 if song.artist != *a { return false; }
             }
-            if let Some(ref a) = self.selected_album {
+            if let Some(ref a) = album {
                 if song.album != *a { return false; }
             }
             true
-        }).map(|(i, _)| i).collect()
+        });
+        self.library_handle.get_songs(filter)
     }
 
     pub fn unique_artists(&self) -> Vec<String> {
-        let mut set: std::collections::BTreeSet<String> = self.library.iter()
-            .map(|s| s.artist.clone()).filter(|a| !a.is_empty()).collect();
-        set.into_iter().collect()
+        self.library_handle.get_unique_artists()
     }
 
     pub fn unique_albums(&self) -> Vec<String> {
-        let mut set: std::collections::BTreeSet<String> = self.library.iter()
-            .map(|s| s.album.clone()).filter(|a| !a.is_empty()).collect();
-        set.into_iter().collect()
+        self.library_handle.get_unique_albums()
     }
 }
 
@@ -442,11 +383,11 @@ impl SimpleComponent for AppModel {
 
         // -- Create content page widgets locally --
         let (songs_page, songs_search_entry, songs_list_box) =
-            build_library_panel("Search songs");
+            widgets::build_library_panel("Search songs");
         let (albums_page, albums_search_entry, albums_list_box) =
-            build_library_panel("Search albums");
+            widgets::build_library_panel("Search albums");
         let (artists_page, artists_search_entry, artists_list_box) =
-            build_library_panel("Search artists");
+            widgets::build_library_panel("Search artists");
 
         let queue_list_box = gtk4::ListBox::new();
         queue_list_box.add_css_class("library-list");
@@ -545,18 +486,19 @@ impl SimpleComponent for AppModel {
             });
         }
 
+        // -- Spawn Library actor --
+        let (lib_event_tx, lib_event_rx) = mpsc::channel();
+        let library_handle = crate::library::spawn(lib_event_tx);
+
         // -- Build model --
         let mut model = AppModel {
-            library: Vec::new(),
-            library_by_path: HashMap::new(),
+            library_handle,
+            library_rx: Some(lib_event_rx),
             queue: QueueState::new(),
             playback: None,
             playback_rx: None,
             volume: 0.7,
             muted: false,
-            library_db: None,
-            playlists_db: None,
-            playlists: Vec::new(),
             current_page: Page::RecentlyAdded,
             current_playlist_id: 0,
             search_text: String::new(),
@@ -570,6 +512,8 @@ impl SimpleComponent for AppModel {
             tick: 0,
             recently_added_reverse: true,
             displayed_song_paths: RefCell::new(Vec::new()),
+            dirty_lists: true,
+            scan_pending: std::collections::VecDeque::new(),
             current_track_label: widgets.current_track_label.clone(),
             play_pause_button: widgets.play_pause_button.clone(),
             shuffle_button: widgets.shuffle_button.clone(),
@@ -598,18 +542,18 @@ impl SimpleComponent for AppModel {
         };
 
         // -- Set up navigation rows --
-        build_nav_row(&widgets.nav_recently_added_row, "Recently added", "songs-view");
-        build_nav_row(&widgets.nav_albums_row, "Albums", "albums");
-        build_nav_row(&widgets.nav_artists_row, "Artists", "artists");
-        build_nav_row(&widgets.nav_songs_row, "Songs", "songs-view");
-        build_nav_row(&widgets.nav_queue_row, "Queue", "queue");
+        widgets::build_nav_row(&widgets.nav_recently_added_row, "Recently added", "songs-view");
+        widgets::build_nav_row(&widgets.nav_albums_row, "Albums", "albums");
+        widgets::build_nav_row(&widgets.nav_artists_row, "Artists", "artists");
+        widgets::build_nav_row(&widgets.nav_songs_row, "Songs", "songs-view");
+        widgets::build_nav_row(&widgets.nav_queue_row, "Queue", "queue");
         {
             let label = gtk4::Label::builder()
                 .css_classes(["row-label"]).label("PLAYLISTS")
                 .halign(gtk4::Align::Start).build();
             widgets.nav_playlists_header.set_child(Some(&label));
         }
-        build_nav_row(&widgets.nav_settings_row, "Settings", "settings");
+        widgets::build_nav_row(&widgets.nav_settings_row, "Settings", "settings");
 
         // Nav row activation signals
         for (row, msg) in [
@@ -659,22 +603,7 @@ impl SimpleComponent for AppModel {
             widgets.current_track_label.set_attributes(Some(&attrs));
         }
 
-        // -- Open databases, load cached songs --
-        if let Ok(conn) = db::open_library_db() {
-            if let Ok(songs) = db::get_all_songs(&conn) {
-                for song in songs {
-                    model.library_by_path.insert(song.path.clone(), model.library.len());
-                    model.library.push(song);
-                }
-            }
-            model.library_db = Some(conn);
-        }
-        if let Ok(conn) = db::open_playlists_db() {
-            if let Ok(pls) = db::get_playlists(&conn) {
-                model.playlists = pls;
-            }
-            model.playlists_db = Some(conn);
-        }
+        // Library actor loads cached songs on its own thread — no DB setup needed here.
 
         // -- Setup playback engine --
         let (tx, rx) = mpsc::channel();
@@ -696,19 +625,23 @@ impl SimpleComponent for AppModel {
             glib::ControlFlow::Continue
         });
 
-        // -- Directory scan --
+        // -- Directory scan (deferred 300ms so window renders first) --
         let sender_clone = sender.clone();
-        std::thread::spawn(move || {
-            scan_directory(sender_clone);
+        glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+            let s = sender_clone.clone();
+            std::thread::spawn(move || {
+                scan::scan_directory(s);
+            });
+            glib::ControlFlow::Break // one-shot
         });
 
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
         match msg {
             AppMsg::Tick => {
-                // Drain playback events into a Vec first to avoid borrow conflicts
+                // Drain playback events
                 let events: Vec<PlaybackEvent> = if let Some(ref rx) = self.playback_rx {
                     let mut evts = Vec::new();
                     while let Ok(event) = rx.try_recv() {
@@ -719,22 +652,11 @@ impl SimpleComponent for AppModel {
                     Vec::new()
                 };
 
-                // Now process events (no borrow on self.playback_rx)
                 for event in events {
                     match event {
-                        PlaybackEvent::Tags { title, artist } => {
-                            if let Some(ref conn) = self.library_db {
-                                if let Some(idx) = self.queue.current {
-                                    if let Some(path) = self.queue.tracks.get(idx).cloned() {
-                                        if let Some(&lib_idx) = self.library_by_path.get(&path) {
-                                            let song = &mut self.library[lib_idx];
-                                            if let Some(t) = title { song.title = t; }
-                                            if let Some(a) = artist { song.artist = a; }
-                                            let _ = db::save_song(conn, song);
-                                        }
-                                    }
-                                }
-                            }
+                        PlaybackEvent::Tags { .. } => {
+                            // TODO: Phase C — metadata is extracted at scan time.
+                            // Runtime tag updates will be handled via LibraryCommand::UpdateSongMetadata.
                         }
                         PlaybackEvent::EndOfStream => { self.advance_track(); }
                         PlaybackEvent::Error(err) => {
@@ -744,14 +666,48 @@ impl SimpleComponent for AppModel {
                         PlaybackEvent::Position { .. } | PlaybackEvent::StateChanged(_) => {}
                     }
                 }
-                // Update progress display
+
+                // Drain library events
+                if let Some(ref rx) = self.library_rx {
+                    while let Ok(event) = rx.try_recv() {
+                        match event {
+                            LibraryEvent::SongsLoaded { .. }
+                            | LibraryEvent::SongsAdded { .. } => {
+                                self.dirty_lists = true;
+                            }
+                            LibraryEvent::PlaylistsChanged => {
+                                self.rebuild_playlists_nav();
+                            }
+                            LibraryEvent::ScanStarted
+                            | LibraryEvent::ScanComplete { .. }
+                            | LibraryEvent::Error(_) => {}
+                        }
+                    }
+                }
+
+                // Fast: update progress/time labels always
                 if let Some(ref pb) = self.playback {
                     if let Some((elapsed, duration)) = pb.query_position() {
                         self.track_progress_scale.set_range(0.0, duration);
                         self.track_progress_scale.set_value(elapsed);
-                        self.elapsed_time_label.set_label(&format_time(elapsed));
-                        self.duration_label.set_label(&format_time(duration));
+                        self.elapsed_time_label.set_label(&widgets::format_time(elapsed));
+                        self.duration_label.set_label(&widgets::format_time(duration));
                     }
+                }
+                // Fast: button states + track label
+                self.sync_progress();
+
+                // Process pending scan batch — cap at 300 per tick to yield main loop
+                if !self.scan_pending.is_empty() {
+                    let limit = self.scan_pending.len().min(300);
+                    let batch: Vec<PathBuf> = self.scan_pending.drain(..limit).collect();
+                    self.process_scan_batch(batch);
+                    self.dirty_lists = true;
+                }
+
+                // Slow: rebuild lists only when content changed
+                if self.dirty_lists {
+                    self.sync_lists();
                 }
             }
 
@@ -794,7 +750,7 @@ impl SimpleComponent for AppModel {
             AppMsg::ShuffleToggled => { self.queue.toggle_shuffle(); }
             AppMsg::RepeatToggled => { self.queue.cycle_repeat(); }
 
-            AppMsg::PlaybackEvent(event) => {
+            AppMsg::PlaybackEvent(_event) => {
                 // Handled inline above in Tick for now
             }
 
@@ -811,37 +767,35 @@ impl SimpleComponent for AppModel {
                 self.queue.clear();
             }
 
-            AppMsg::NavSongs => { self.current_page = Page::Songs; }
-            AppMsg::NavAlbums => { self.current_page = Page::Albums; }
-            AppMsg::NavArtists => { self.current_page = Page::Artists; }
-            AppMsg::NavQueue => { self.current_page = Page::Queue; }
+            AppMsg::NavSongs => { self.current_page = Page::Songs; self.dirty_lists = true; }
+            AppMsg::NavAlbums => { self.current_page = Page::Albums; self.dirty_lists = true; }
+            AppMsg::NavArtists => { self.current_page = Page::Artists; self.dirty_lists = true; }
+            AppMsg::NavQueue => { self.current_page = Page::Queue; self.dirty_lists = true; }
             AppMsg::NavRecentlyAdded => {
                 self.current_page = Page::RecentlyAdded;
                 self.current_playlist_id = 0;
+                self.dirty_lists = true;
             }
             AppMsg::NavSettings => { self.current_page = Page::Settings; }
             AppMsg::NavPlaylistRow(id) => {
                 self.current_playlist_id = id;
                 self.current_page = Page::Songs;
-                // Load playlist songs into song view
-                if let Some(ref conn) = self.playlists_db {
-                    if let Ok(songs) = db::get_playlist_songs(conn, id) {
-                        // For now, just switch to songs view
-                        // TODO: set base list to playlist songs
-                    }
-                }
+                self.dirty_lists = true;
             }
             AppMsg::SearchChanged(text) => {
                 self.search_text = text.clone();
                 self.search_lowered = text.to_lowercase();
+                self.dirty_lists = true;
             }
             AppMsg::SearchAlbumsChanged(text) => {
                 self.search_albums_text = text.clone();
                 self.search_albums_lowered = text.to_lowercase();
+                self.dirty_lists = true;
             }
             AppMsg::SearchArtistsChanged(text) => {
                 self.search_artists_text = text.clone();
                 self.search_artists_lowered = text.to_lowercase();
+                self.dirty_lists = true;
             }
 
             AppMsg::CreatePlaylist(_) => {}
@@ -849,30 +803,32 @@ impl SimpleComponent for AppModel {
             AppMsg::RenamePlaylist(_, _) => {}
             AppMsg::AddToPlaylist(_, _) => {}
             AppMsg::ScanAddSong(path) => {
-                // Check if already in library
-                if !self.library_by_path.contains_key(&path) {
-                    let song = Song::new(path);
-                    let idx = self.library.len();
-                    self.library_by_path.insert(song.path.clone(), idx);
-                    self.library.push(song.clone());
-                    // Save to DB
-                    if let Some(ref conn) = self.library_db {
-                        let _ = db::save_song(conn, &song);
-                    }
-                }
+                // Queue for batch processing in Tick — don't rebuild here
+                self.scan_pending.push_back(path);
+            }
+            AppMsg::BatchScan(paths) => {
+                // Queue for capped processing in Tick — don't block here
+                self.scan_pending.extend(paths);
+                self.dirty_lists = true;
             }
             AppMsg::ScanStarted => {}
             AppMsg::ScanComplete(count) => {
                 eprintln!("Library scan complete: {} songs", count);
+                // Flush any remaining pending songs
+                if !self.scan_pending.is_empty() {
+                    let batch: Vec<PathBuf> = self.scan_pending.drain(..).collect();
+                    self.process_scan_batch(batch);
+                }
+                self.dirty_lists = true;
             }
             AppMsg::ScanError(err) => {
                 eprintln!("Library scan error: {}", err);
             }
         }
 
-        // Sync UI after every message
-        self.sync_ui();
-    }
+            // Sync UI after every message
+            // self.sync_ui();  // REMOVED — was causing O(n²) rebuilds on every message
+        }
 }
 
 impl AppModel {
@@ -894,7 +850,57 @@ impl AppModel {
         }
     }
 
-    fn sync_ui(&self) {
+    fn process_scan_batch(&mut self, paths: Vec<PathBuf>) {
+        let songs: Vec<Song> = paths.into_iter().map(Song::new).collect();
+        self.library_handle.add_songs(songs);
+    }
+
+    fn sync_progress(&self) {
+        // Fast path: update labels and button states only (no list rebuild)
+        if let Some(song) = self.current_song() {
+            self.current_track_label.set_label(&song.label());
+        } else {
+            self.current_track_label.set_label("No track selected");
+        }
+
+        if self.queue.shuffle {
+            self.shuffle_button.set_css_classes(&["playback-button", "active-control"]);
+        } else {
+            self.shuffle_button.set_css_classes(&["playback-button"]);
+        }
+        if self.queue.repeat != RepeatMode::Off {
+            self.repeat_button.set_css_classes(&["playback-button", "active-control"]);
+        } else {
+            self.repeat_button.set_css_classes(&["playback-button"]);
+        }
+
+        self.volume_scale.set_value(self.volume * 100.0);
+        let icon = if self.muted { "audio-volume-muted-symbolic" } else { "audio-volume-medium-symbolic" };
+        self.mute_button.set_icon_name(icon);
+    }
+
+    fn sync_lists(&mut self) {
+        // Slow path: rebuild visible list. Only call when content changed.
+        let name = match self.current_page {
+            Page::RecentlyAdded | Page::Songs => "songs-view",
+            Page::Albums => "albums",
+            Page::Artists => "artists",
+            Page::Queue => "queue",
+            Page::Settings => "settings",
+        };
+        self.content_stack.set_visible_child_name(name);
+
+        match self.current_page {
+            Page::Songs | Page::RecentlyAdded => self.rebuild_song_list(),
+            Page::Albums => self.rebuild_albums_list(),
+            Page::Artists => self.rebuild_artists_list(),
+            Page::Queue => self.rebuild_queue_list(),
+            Page::Settings => {},
+        }
+        self.dirty_lists = false;
+    }
+
+    fn sync_ui(&mut self) {
         let name = match self.current_page {
             Page::RecentlyAdded | Page::Songs => "songs-view",
             Page::Albums => "albums",
@@ -934,46 +940,79 @@ impl AppModel {
         }
     }
 
-    fn rebuild_song_list(&self) {
-        self.song_list_box.remove_all();
-        let mut paths = self.displayed_song_paths.borrow_mut();
-        paths.clear();
-        let indices = self.filtered_indices();
-        for &idx in &indices {
-            let song = &self.library[idx];
-            let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-            row_box.add_css_class("song-row");
+    fn rebuild_song_list(&mut self) {
+        let songs = self.filtered_songs();
+        let current_row_count = {
+            let mut n = 0i32;
+            loop {
+                if self.song_list_box.row_at_index(n).is_none() { break; }
+                n += 1;
+            }
+            n as usize
+        };
 
-            let indicator = gtk4::Image::new();
-            row_box.append(&indicator);
+        let paths = self.displayed_song_paths.borrow();
+        let can_append = current_row_count > 0
+            && songs.len() > current_row_count
+            && current_row_count <= paths.len()
+            && songs[..current_row_count]
+                .iter()
+                .zip(paths.iter().take(current_row_count))
+                .all(|(s, p)| s.path == *p);
 
-            let title_label = gtk4::Label::builder()
-                .label(&song.title).halign(gtk4::Align::Start)
-                .hexpand(true).ellipsize(gtk4::pango::EllipsizeMode::End).build();
-            row_box.append(&title_label);
+        drop(paths);
 
-            let artist_label = gtk4::Label::builder()
-                .label(&song.artist).css_classes(["dim-label"])
-                .ellipsize(gtk4::pango::EllipsizeMode::Start)
-                .max_width_chars(15).build();
-            row_box.append(&artist_label);
-
-            let album_label = gtk4::Label::builder()
-                .label(&song.album).css_classes(["dim-label"])
-                .ellipsize(gtk4::pango::EllipsizeMode::Start)
-                .max_width_chars(15).build();
-            row_box.append(&album_label);
-
-            let d_label = gtk4::Label::builder()
-                .label(&song.duration_str)
-                .css_classes(["dim-label", "duration-label"]).build();
-            row_box.append(&d_label);
-
-            let row = gtk4::ListBoxRow::new();
-            row.set_child(Some(&row_box));
-            paths.push(song.path.clone());
-            self.song_list_box.append(&row);
+        if can_append {
+            let mut paths = self.displayed_song_paths.borrow_mut();
+            for song in &songs[current_row_count..] {
+                let row = self.build_song_row(song);
+                paths.push(song.path.clone());
+                self.song_list_box.append(&row);
+            }
+        } else {
+            self.song_list_box.remove_all();
+            let mut paths = self.displayed_song_paths.borrow_mut();
+            paths.clear();
+            for song in &songs {
+                let row = self.build_song_row(song);
+                paths.push(song.path.clone());
+                self.song_list_box.append(&row);
+            }
         }
+    }
+
+    fn build_song_row(&self, song: &Song) -> gtk4::ListBoxRow {
+        let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        row_box.add_css_class("song-row");
+
+        let indicator = gtk4::Image::new();
+        row_box.append(&indicator);
+
+        let title_label = gtk4::Label::builder()
+            .label(&song.title).halign(gtk4::Align::Start)
+            .hexpand(true).ellipsize(gtk4::pango::EllipsizeMode::End).build();
+        row_box.append(&title_label);
+
+        let artist_label = gtk4::Label::builder()
+            .label(&song.artist).css_classes(["dim-label"])
+            .ellipsize(gtk4::pango::EllipsizeMode::Start)
+            .max_width_chars(15).build();
+        row_box.append(&artist_label);
+
+        let album_label = gtk4::Label::builder()
+            .label(&song.album).css_classes(["dim-label"])
+            .ellipsize(gtk4::pango::EllipsizeMode::Start)
+            .max_width_chars(15).build();
+        row_box.append(&album_label);
+
+        let d_label = gtk4::Label::builder()
+            .label(&song.duration_str)
+            .css_classes(["dim-label", "duration-label"]).build();
+        row_box.append(&d_label);
+
+        let row = gtk4::ListBoxRow::new();
+        row.set_child(Some(&row_box));
+        row
     }
 
     fn rebuild_albums_list(&self) {
@@ -1031,7 +1070,8 @@ impl AppModel {
         }
         let header_idx = self.nav_playlists_header.index();
         let mut pos = header_idx + 1;
-        for pl in &self.playlists {
+        let playlists = self.library_handle.get_playlists();
+        for pl in &playlists {
             let row = gtk4::ListBoxRow::new();
             row.add_css_class("nav-sub-row");
             row.set_child(Some(&gtk4::Label::builder()
@@ -1044,12 +1084,17 @@ impl AppModel {
 
     fn rebuild_queue_list(&self) {
         self.queue_list_box.remove_all();
+        let all_songs = self.library_handle.get_all_songs();
         for (i, path) in self.queue.tracks.iter().enumerate() {
-            let label = if let Some(&lib_idx) = self.library_by_path.get(path) {
-                self.library[lib_idx].label()
-            } else {
-                path.file_stem().and_then(|s| s.to_str()).unwrap_or("Unknown").to_string()
-            };
+            let label = all_songs.iter()
+                .find(|s| s.path == *path)
+                .map(|s| s.label())
+                .unwrap_or_else(|| {
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("Unknown")
+                        .to_string()
+                });
             let row = gtk4::ListBoxRow::new();
             row.set_child(Some(&gtk4::Label::builder()
                 .css_classes(["song-row"]).label(&label)
@@ -1060,67 +1105,4 @@ impl AppModel {
             self.queue_list_box.append(&row);
         }
     }
-}
-
-fn format_time(seconds: f64) -> String {
-    let total = seconds as u64;
-    let mins = total / 60;
-    let secs = total % 60;
-    format!("{}:{:02}", mins, secs)
-}
-
-fn build_library_panel(placeholder: &str) -> (gtk4::Box, gtk4::SearchEntry, gtk4::ListBox) {
-    let page_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    page_box.add_css_class("content-page");
-
-    let panel_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    panel_box.set_vexpand(true);
-    panel_box.add_css_class("library-panel");
-    page_box.append(&panel_box);
-
-    let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some(placeholder));
-    panel_box.append(&search);
-
-    let list_box = gtk4::ListBox::new();
-    list_box.add_css_class("library-list");
-    list_box.add_css_class("boxed-list");
-
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_child(Some(&list_box));
-    panel_box.append(&scrolled);
-
-    (page_box, search, list_box)
-}
-
-fn build_nav_row(row: &gtk4::ListBoxRow, label_text: &str, _page_name: &str) {
-    let label = gtk4::Label::builder()
-        .css_classes(["row-label"]).label(label_text)
-        .halign(gtk4::Align::Start).build();
-    row.set_child(Some(&label));
-}
-
-fn scan_directory(sender: ComponentSender<AppModel>) {
-    let music_dir = dirs::audio_dir().unwrap_or_else(|| {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("Music")
-    });
-
-    let supported = ["mp3", "flac", "ogg", "wav", "m4a"];
-    let mut count = 0usize;
-
-    for entry in walkdir::WalkDir::new(&music_dir).follow_links(true)
-        .into_iter().filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() { continue; }
-        let ext = path.extension().and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase()).unwrap_or_default();
-        if !supported.contains(&ext.as_str()) { continue; }
-
-        count += 1;
-        let _ = sender.input(AppMsg::ScanAddSong(path.to_path_buf()));
-    }
-
-    let _ = sender.input(AppMsg::ScanComplete(count));
 }

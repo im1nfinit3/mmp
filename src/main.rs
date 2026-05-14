@@ -1,8 +1,9 @@
 use gstreamer as gst;
 
 mod app;
-mod db;
+mod library;
 mod playback;
+mod ui;
 
 fn main() {
     gst::init().expect("Failed to initialize GStreamer");
