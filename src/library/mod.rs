@@ -277,11 +277,10 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                             db::create_playlist(conn, &name).map_err(|e| e.to_string())
                         });
                     if result.is_ok() {
-                        if let Some(conn) = playlists_db.as_ref() {
-                            if let Ok(pls) = db::get_playlists(conn) {
+                        if let Some(conn) = playlists_db.as_ref()
+                            && let Ok(pls) = db::get_playlists(conn) {
                                 playlists = pls;
                             }
-                        }
                         let _ = event_tx.send(LibraryEvent::PlaylistsChanged);
                     }
                     let _ = reply.send(result);

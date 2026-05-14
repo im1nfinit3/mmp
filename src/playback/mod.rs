@@ -6,7 +6,6 @@ pub use queue::QueueState;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_pbutils::Discoverer;
-use glib;
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;

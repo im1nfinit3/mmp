@@ -31,21 +31,18 @@ pub fn filter_songs<'a>(
                     return false;
                 }
             }
-            if let Some(a) = selected_artist {
-                if song.artist != *a {
+            if let Some(a) = selected_artist
+                && song.artist != *a {
                     return false;
                 }
-            }
-            if let Some(a) = selected_album {
-                if song.album != *a {
+            if let Some(a) = selected_album
+                && song.album != *a {
                     return false;
                 }
-            }
-            if let Some(pred) = extra_predicate {
-                if !pred(song) {
+            if let Some(pred) = extra_predicate
+                && !pred(song) {
                     return false;
                 }
-            }
             true
         })
         .collect()

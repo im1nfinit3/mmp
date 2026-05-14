@@ -1,7 +1,25 @@
-//! UI widgets — presentation layer for the media player.
+//! UI layer — Relm4 sub-components.
 //!
-//! Phase A: widget builders extracted from `app.rs`.
-//! Later phases: Relm4 sub-components (PlaybackBar, NavPane, ContentPane).
+//! Component tree:
+//! ```text
+//! AppModel (parent)
+//! ├── PlaybackBar      — transport controls, progress, volume, track label
+//! ├── NavPane          — navigation sidebar
+//! └── ContentPane      — stack of library views
+//! ```
 
-/// Module placeholder.
+/// Which page is visible in the content pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    RecentlyAdded,
+    Songs,
+    Albums,
+    Artists,
+    Queue,
+    Settings,
+}
+
+pub mod content_pane;
+pub mod nav_pane;
+pub mod playback_bar;
 pub mod widgets;

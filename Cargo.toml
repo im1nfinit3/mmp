@@ -6,10 +6,10 @@ description = "A GTK4 music player (Rust port)"
 
 [dependencies]
 # GTK4 + Relm4 (Elm-inspired GUI framework)
-gtk4 = { version = "0.9", package = "gtk4" }
-glib = "0.20"
-relm4 = { version = "0.9", features = ["macros"] }
-relm4-components = "0.9"
+gtk4 = { version = "0.11", package = "gtk4" }
+glib = "0.22"
+relm4 = { version = "0.11", features = ["macros"] }
+relm4-components = "0.11"
 
 # GStreamer for audio playback and metadata
 gstreamer = "0.25"
