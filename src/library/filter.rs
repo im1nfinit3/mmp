@@ -32,17 +32,20 @@ pub fn filter_songs<'a>(
                 }
             }
             if let Some(a) = selected_artist
-                && song.artist != *a {
-                    return false;
-                }
+                && song.artist != *a
+            {
+                return false;
+            }
             if let Some(a) = selected_album
-                && song.album != *a {
-                    return false;
-                }
+                && song.album != *a
+            {
+                return false;
+            }
             if let Some(pred) = extra_predicate
-                && !pred(song) {
-                    return false;
-                }
+                && !pred(song)
+            {
+                return false;
+            }
             true
         })
         .collect()

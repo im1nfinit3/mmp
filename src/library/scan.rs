@@ -8,13 +8,13 @@
 //! Files with discovery errors are skipped (may be revisited in the future).
 
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use gstreamer as gst;
 use gstreamer_pbutils::Discoverer;
 
 use crate::library::song::Song;
-use crate::library::{LibraryEvent, LibraryHandle};
+use crate::library::{LibraryEvent, LibraryHandle, db};
 
 // ---------------------------------------------------------------------------
 // Shared mutable state between timeout poll and signal callbacks
@@ -63,11 +63,9 @@ impl ScanState {
 /// Spawns a background walkdir thread and sets up a main-thread poller that
 /// feeds paths to `GstDiscoverer::discover_uri_async`.  Metadata is extracted
 /// in the `discovered` signal callback and sent to the Library actor.
-pub fn start_scan(
-    library_handle: LibraryHandle,
-    event_tx: mpsc::Sender<LibraryEvent>,
-) {
+pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryEvent>) {
     let _ = event_tx.send(LibraryEvent::ScanStarted);
+    let metadata_cache = library_handle.get_metadata_cache();
 
     // -- Channel: walkdir (bg) → main thread --
     let (path_tx, path_rx) = mpsc::channel::<Vec<PathBuf>>();
@@ -101,6 +99,12 @@ pub fn start_scan(
                 continue;
             }
 
+            if let Some(fingerprint) = db::fingerprint_for_path(path)
+                && metadata_cache.get(path) == Some(&fingerprint)
+            {
+                continue;
+            }
+
             batch.push(path.to_path_buf());
 
             if batch.len() >= 200 {
@@ -118,8 +122,8 @@ pub fn start_scan(
     });
 
     // -- Create GstDiscoverer on main thread --
-    let discoverer = Discoverer::new(gst::ClockTime::from_seconds(2))
-        .expect("Failed to create GstDiscoverer");
+    let discoverer =
+        Discoverer::new(gst::ClockTime::from_seconds(2)).expect("Failed to create GstDiscoverer");
 
     // -- Shared state (main-thread only, but Rust needs Send+Sync for closures) --
     let state = Arc::new(Mutex::new(ScanState {
@@ -140,11 +144,7 @@ pub fn start_scan(
             let mut s = state.lock().unwrap();
 
             if let Some(err) = error {
-                eprintln!(
-                    "Discovery error for {}: {:?}",
-                    info.uri(),
-                    err
-                );
+                eprintln!("Discovery error for {}: {:?}", info.uri(), err);
                 // TODO: may revisit — currently skipping files with
                 // discovery errors
                 s.pending = s.pending.saturating_sub(1);
@@ -154,9 +154,7 @@ pub fn start_scan(
 
             // Reconstruct file path from URI
             let uri_str = info.uri().to_string();
-            let path = PathBuf::from(
-                uri_str.strip_prefix("file://").unwrap_or(&uri_str),
-            );
+            let path = PathBuf::from(uri_str.strip_prefix("file://").unwrap_or(&uri_str));
 
             let mut song = Song::new(path);
 
@@ -197,33 +195,27 @@ pub fn start_scan(
     // -- Timeout-based poll for path batches --
     let state_for_poll = Arc::clone(&state);
     let discoverer_for_poll = discoverer.clone();
-    let poll_id = glib::timeout_add_local(
-        std::time::Duration::from_millis(100),
-        move || {
-            let mut s = state_for_poll.lock().unwrap();
+    let poll_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        let mut s = state_for_poll.lock().unwrap();
 
-            // Drain all available path batches
-            while let Ok(batch) = s.path_rx.try_recv() {
-                if batch.is_empty() {
-                    // walkdir sentinel — no more paths coming
-                    s.walkdir_done = true;
-                    s.check_complete();
-                } else {
-                    for path in &batch {
-                        let uri = format!("file://{}", path.display());
-                        if discoverer_for_poll
-                            .discover_uri_async(&uri)
-                            .is_ok()
-                        {
-                            s.pending += 1;
-                        }
+        // Drain all available path batches
+        while let Ok(batch) = s.path_rx.try_recv() {
+            if batch.is_empty() {
+                // walkdir sentinel — no more paths coming
+                s.walkdir_done = true;
+                s.check_complete();
+            } else {
+                for path in &batch {
+                    let uri = format!("file://{}", path.display());
+                    if discoverer_for_poll.discover_uri_async(&uri).is_ok() {
+                        s.pending += 1;
                     }
                 }
             }
+        }
 
-            glib::ControlFlow::Continue
-        },
-    );
+        glib::ControlFlow::Continue
+    });
 
     state.lock().unwrap().poll_source = Some(poll_id);
 

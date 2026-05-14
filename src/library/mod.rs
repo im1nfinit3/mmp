@@ -31,17 +31,15 @@ enum LibraryCommand {
         reply: mpsc::Sender<Vec<Song>>,
     },
     /// Get all songs.
-    GetAllSongs {
-        reply: mpsc::Sender<Vec<Song>>,
+    GetAllSongs { reply: mpsc::Sender<Vec<Song>> },
+    /// Get path fingerprints for songs whose cached metadata is current.
+    GetMetadataCache {
+        reply: mpsc::Sender<HashMap<PathBuf, db::FileFingerprint>>,
     },
     /// Get unique artist names.
-    GetUniqueArtists {
-        reply: mpsc::Sender<Vec<String>>,
-    },
+    GetUniqueArtists { reply: mpsc::Sender<Vec<String>> },
     /// Get unique album names.
-    GetUniqueAlbums {
-        reply: mpsc::Sender<Vec<String>>,
-    },
+    GetUniqueAlbums { reply: mpsc::Sender<Vec<String>> },
     /// Create a new playlist.
     CreatePlaylist {
         name: String,
@@ -125,6 +123,12 @@ impl LibraryHandle {
         rx.recv().unwrap_or_default()
     }
 
+    pub fn get_metadata_cache(&self) -> HashMap<PathBuf, db::FileFingerprint> {
+        let (reply, rx) = mpsc::channel();
+        let _ = self.tx.send(LibraryCommand::GetMetadataCache { reply });
+        rx.recv().unwrap_or_default()
+    }
+
     /// Get sorted unique artist names.
     pub fn get_unique_artists(&self) -> Vec<String> {
         let (reply, rx) = mpsc::channel();
@@ -146,7 +150,8 @@ impl LibraryHandle {
             name: name.to_string(),
             reply,
         });
-        rx.recv().unwrap_or(Err("Library actor disconnected".into()))
+        rx.recv()
+            .unwrap_or(Err("Library actor disconnected".into()))
     }
 
     /// Delete a playlist by id.
@@ -180,10 +185,9 @@ impl LibraryHandle {
     /// Get songs in a playlist, in position order.
     pub fn get_playlist_songs(&self, playlist_id: i64) -> Vec<Song> {
         let (reply, rx) = mpsc::channel();
-        let _ = self.tx.send(LibraryCommand::GetPlaylistSongs {
-            playlist_id,
-            reply,
-        });
+        let _ = self
+            .tx
+            .send(LibraryCommand::GetPlaylistSongs { playlist_id, reply });
         rx.recv().unwrap_or_default()
     }
 }
@@ -237,26 +241,33 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                         if let Some(conn) = &library_db {
                             let _ = db::save_song(conn, song);
                         }
-                        if !by_path.contains_key(&song.path) {
+                        if let Some(&idx) = by_path.get(&song.path) {
+                            songs[idx] = song.clone();
+                        } else {
                             by_path.insert(song.path.clone(), songs.len());
                             songs.push(song.clone());
                         }
                     }
                     if !new_songs.is_empty() {
-                        let _ = event_tx.send(LibraryEvent::SongsAdded {
-                            songs: new_songs,
-                        });
+                        let _ = event_tx.send(LibraryEvent::SongsAdded { songs: new_songs });
                     }
                 }
 
                 LibraryCommand::GetSongs { filter, reply } => {
-                    let result: Vec<Song> =
-                        songs.iter().filter(|s| filter(s)).cloned().collect();
+                    let result: Vec<Song> = songs.iter().filter(|s| filter(s)).cloned().collect();
                     let _ = reply.send(result);
                 }
 
                 LibraryCommand::GetAllSongs { reply } => {
                     let _ = reply.send(songs.clone());
+                }
+
+                LibraryCommand::GetMetadataCache { reply } => {
+                    let result = library_db
+                        .as_ref()
+                        .and_then(|conn| db::get_metadata_cache(conn).ok())
+                        .unwrap_or_default();
+                    let _ = reply.send(result);
                 }
 
                 LibraryCommand::GetUniqueArtists { reply } => {
@@ -278,9 +289,10 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                         });
                     if result.is_ok() {
                         if let Some(conn) = playlists_db.as_ref()
-                            && let Ok(pls) = db::get_playlists(conn) {
-                                playlists = pls;
-                            }
+                            && let Ok(pls) = db::get_playlists(conn)
+                        {
+                            playlists = pls;
+                        }
                         let _ = event_tx.send(LibraryEvent::PlaylistsChanged);
                     }
                     let _ = reply.send(result);
@@ -313,9 +325,7 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                     if let Some(conn) = &playlists_db {
                         // Look up the Song by path in our in-memory store
                         if let Some(&idx) = by_path.get(&song_path) {
-                            let _ = db::add_song_to_playlist(
-                                conn, playlist_id, &songs[idx],
-                            );
+                            let _ = db::add_song_to_playlist(conn, playlist_id, &songs[idx]);
                         }
                     }
                 }
@@ -324,15 +334,10 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                     let _ = reply.send(playlists.clone());
                 }
 
-                LibraryCommand::GetPlaylistSongs {
-                    playlist_id,
-                    reply,
-                } => {
+                LibraryCommand::GetPlaylistSongs { playlist_id, reply } => {
                     let result = playlists_db
                         .as_ref()
-                        .and_then(|conn| {
-                            db::get_playlist_songs(conn, playlist_id).ok()
-                        })
+                        .and_then(|conn| db::get_playlist_songs(conn, playlist_id).ok())
                         .unwrap_or_default();
                     let _ = reply.send(result);
                 }
@@ -344,4 +349,3 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
 
     LibraryHandle { tx: cmd_tx }
 }
-

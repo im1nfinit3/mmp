@@ -1,15 +1,25 @@
 //! SQLite persistence for the music library and playlists.
 
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{Connection, Result as SqlResult, params};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use super::song::Song;
+
+pub const CURRENT_METADATA_VERSION: i64 = 1;
 
 /// A named playlist from the database.
 #[derive(Clone, Debug)]
 pub struct Playlist {
     pub id: i64,
     pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileFingerprint {
+    pub file_size: u64,
+    pub modified_unix_ms: Option<i64>,
+    pub metadata_version: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -23,7 +33,10 @@ CREATE TABLE IF NOT EXISTS songs (
     title TEXT,
     artist TEXT,
     album TEXT,
-    duration_str TEXT
+    duration_str TEXT,
+    file_size INTEGER,
+    modified_unix_ms INTEGER,
+    metadata_version INTEGER NOT NULL DEFAULT 0
 );
 ";
 
@@ -54,29 +67,113 @@ pub fn open(path: &Path) -> SqlResult<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
     conn.execute_batch(SONGS_DDL)?;
+    ensure_song_cache_columns(&conn)?;
     conn.execute_batch(PLAYLISTS_DDL)?;
     conn.execute_batch(PLAYLIST_SONGS_DDL)?;
     Ok(conn)
+}
+
+fn ensure_song_cache_columns(conn: &Connection) -> SqlResult<()> {
+    conn.execute("ALTER TABLE songs ADD COLUMN file_size INTEGER", [])
+        .ok();
+    conn.execute("ALTER TABLE songs ADD COLUMN modified_unix_ms INTEGER", [])
+        .ok();
+    conn.execute(
+        "ALTER TABLE songs ADD COLUMN metadata_version INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .ok();
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Songs (library cache)
 // ---------------------------------------------------------------------------
 
-/// Persist a song to the library database (INSERT OR REPLACE by path).
+/// Persist a song to the library database, preserving the row id by path.
 pub fn save_song(conn: &Connection, song: &Song) -> SqlResult<()> {
+    let fingerprint = fingerprint_for_path(&song.path);
     conn.execute(
-        "INSERT OR REPLACE INTO songs (path, title, artist, album, duration_str)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO songs (
+            path,
+            title,
+            artist,
+            album,
+            duration_str,
+            file_size,
+            modified_unix_ms,
+            metadata_version
+        )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(path) DO UPDATE SET
+            title = excluded.title,
+            artist = excluded.artist,
+            album = excluded.album,
+            duration_str = excluded.duration_str,
+            file_size = excluded.file_size,
+            modified_unix_ms = excluded.modified_unix_ms,
+            metadata_version = excluded.metadata_version",
         params![
             song.path.to_string_lossy(),
             song.title,
             song.artist,
             song.album,
             song.duration_str,
+            fingerprint.map(|f| f.file_size as i64),
+            fingerprint.and_then(|f| f.modified_unix_ms),
+            fingerprint.map_or(0, |f| f.metadata_version),
         ],
     )?;
     Ok(())
+}
+
+pub fn fingerprint_for_path(path: &Path) -> Option<FileFingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified_unix_ms = metadata.modified().ok().and_then(|modified| {
+        modified
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+    });
+
+    Some(FileFingerprint {
+        file_size: metadata.len(),
+        modified_unix_ms,
+        metadata_version: CURRENT_METADATA_VERSION,
+    })
+}
+
+pub fn get_metadata_cache(
+    conn: &Connection,
+) -> SqlResult<std::collections::HashMap<PathBuf, FileFingerprint>> {
+    let mut stmt = conn.prepare(
+        "SELECT path, file_size, modified_unix_ms, metadata_version
+         FROM songs
+         WHERE file_size IS NOT NULL
+           AND metadata_version = ?1
+           AND COALESCE(title, '') != ''
+           AND COALESCE(artist, '') != ''
+           AND COALESCE(album, '') != ''
+           AND COALESCE(duration_str, '') != ''",
+    )?;
+    let rows = stmt.query_map(params![CURRENT_METADATA_VERSION], |row| {
+        let file_size: i64 = row.get(1)?;
+        Ok((
+            PathBuf::from(row.get::<_, String>(0)?),
+            FileFingerprint {
+                file_size: file_size.max(0) as u64,
+                modified_unix_ms: row.get(2)?,
+                metadata_version: row.get(3)?,
+            },
+        ))
+    })?;
+
+    let mut cache = std::collections::HashMap::new();
+    for row in rows {
+        let (path, fingerprint) = row?;
+        cache.insert(path, fingerprint);
+    }
+    Ok(cache)
 }
 
 /// Load every cached song from the library database.

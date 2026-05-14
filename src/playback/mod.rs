@@ -116,7 +116,8 @@ impl Playback {
 
     /// Play the file at `path`. Returns immediately; playback starts async.
     pub fn play_file(&mut self, path: &Path) {
-        self.playbin.set_property("uri", format!("file://{}", path.display()));
+        self.playbin
+            .set_property("uri", format!("file://{}", path.display()));
         let _ = self.playbin.set_state(gst::State::Playing);
         self.event_tx
             .send(PlaybackEvent::StateChanged(PlaybackState::Playing))
@@ -152,10 +153,9 @@ impl Playback {
     /// Seek to `seconds` in the current track.
     pub fn seek(&mut self, seconds: f64) {
         let pos = gst::ClockTime::from_seconds(seconds as u64);
-        let _ = self.playbin.seek_simple(
-            gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
-            pos,
-        );
+        let _ = self
+            .playbin
+            .seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, pos);
     }
 
     /// Set volume in range [0.0, 1.0].

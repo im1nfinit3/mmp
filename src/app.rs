@@ -12,14 +12,10 @@ use relm4::prelude::*;
 use crate::library::scan;
 use crate::library::{LibraryEvent, LibraryHandle};
 use crate::playback::{Playback, PlaybackEvent, QueueState};
-use crate::ui::content_pane::{
-    ContentPane, ContentPaneMsg, ContentPaneOutput,
-};
-use crate::ui::nav_pane::{NavPane, NavPaneMsg, NavPaneOutput};
-use crate::ui::playback_bar::{
-    PlaybackBar, PlaybackBarMsg, PlaybackBarOutput,
-};
 use crate::ui::Page;
+use crate::ui::content_pane::{ContentPane, ContentPaneMsg, ContentPaneOutput};
+use crate::ui::nav_pane::{NavPane, NavPaneMsg, NavPaneOutput};
+use crate::ui::playback_bar::{PlaybackBar, PlaybackBarMsg, PlaybackBarOutput};
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -133,30 +129,25 @@ impl SimpleComponent for AppModel {
         // -- Create PlaybackBar child --
         let pb = PlaybackBar::builder()
             .launch(())
-            .forward(
-                sender.input_sender(),
-                |msg: PlaybackBarOutput| AppMsg::PlaybackBarOutput(msg),
-            );
-        widgets
-            .playback_bar_slot
-            .append(pb.widget());
+            .forward(sender.input_sender(), |msg: PlaybackBarOutput| {
+                AppMsg::PlaybackBarOutput(msg)
+            });
+        widgets.playback_bar_slot.append(pb.widget());
 
         // -- Create NavPane child --
         let nav = NavPane::builder()
             .launch(())
-            .forward(
-                sender.input_sender(),
-                |msg: NavPaneOutput| AppMsg::NavPaneOutput(msg),
-            );
+            .forward(sender.input_sender(), |msg: NavPaneOutput| {
+                AppMsg::NavPaneOutput(msg)
+            });
         widgets.nav_pane_slot.append(nav.widget());
 
         // -- Create ContentPane child --
         let content = ContentPane::builder()
             .launch(library_handle.clone())
-            .forward(
-                sender.input_sender(),
-                |msg: ContentPaneOutput| AppMsg::ContentPaneOutput(msg),
-            );
+            .forward(sender.input_sender(), |msg: ContentPaneOutput| {
+                AppMsg::ContentPaneOutput(msg)
+            });
         widgets.content_pane_slot.append(content.widget());
 
         // -- Setup playback engine --
@@ -231,9 +222,10 @@ impl SimpleComponent for AppModel {
                         PlaybackEvent::Position { .. }
                         | PlaybackEvent::Tags { .. }
                         | PlaybackEvent::StateChanged(_) => {
-                            let _ = self.playback_bar.sender().send(
-                                PlaybackBarMsg::PlaybackEvent(event.clone())
-                            );
+                            let _ = self
+                                .playback_bar
+                                .sender()
+                                .send(PlaybackBarMsg::PlaybackEvent(event.clone()));
                         }
                     }
                 }
@@ -242,21 +234,19 @@ impl SimpleComponent for AppModel {
                 if let Some(ref rx) = self.library_rx {
                     while let Ok(event) = rx.try_recv() {
                         match event {
-                            LibraryEvent::SongsLoaded { .. }
-                            | LibraryEvent::SongsAdded { .. } => {
-                                let _ = self.content_pane.sender().send(
-                                    ContentPaneMsg::SongsAdded,
-                                );
+                            LibraryEvent::SongsLoaded { .. } | LibraryEvent::SongsAdded { .. } => {
+                                let _ = self.content_pane.sender().send(ContentPaneMsg::SongsAdded);
                             }
                             LibraryEvent::PlaylistsChanged => {
-                                let playlists =
-                                    self.library_handle.get_playlists();
-                                let _ = self.nav_pane.sender().send(
-                                    NavPaneMsg::SetPlaylists(playlists.clone()),
-                                );
-                                let _ = self.content_pane.sender().send(
-                                    ContentPaneMsg::SetPlaylists(playlists),
-                                );
+                                let playlists = self.library_handle.get_playlists();
+                                let _ = self
+                                    .nav_pane
+                                    .sender()
+                                    .send(NavPaneMsg::SetPlaylists(playlists.clone()));
+                                let _ = self
+                                    .content_pane
+                                    .sender()
+                                    .send(ContentPaneMsg::SetPlaylists(playlists));
                             }
                             LibraryEvent::ScanStarted
                             | LibraryEvent::ScanComplete { .. }
@@ -270,9 +260,7 @@ impl SimpleComponent for AppModel {
             AppMsg::PlaybackBarOutput(msg) => match msg {
                 PlaybackBarOutput::PlayPause => {
                     if let Some(ref mut pb) = self.playback {
-                        if self.queue.current.is_none()
-                            && !self.queue.tracks.is_empty()
-                        {
+                        if self.queue.current.is_none() && !self.queue.tracks.is_empty() {
                             let idx = self.queue.tracks.len() - 1;
                             self.queue.current = Some(idx);
                             pb.play_file(&self.queue.tracks[idx]);
@@ -284,11 +272,12 @@ impl SimpleComponent for AppModel {
                 }
                 PlaybackBarOutput::Previous => {
                     if let Some(current) = self.queue.current
-                        && current > 0 {
-                            let prev = current - 1;
-                            self.queue.current = Some(prev);
-                            self.play_track_at(prev);
-                        }
+                        && current > 0
+                    {
+                        let prev = current - 1;
+                        self.queue.current = Some(prev);
+                        self.play_track_at(prev);
+                    }
                 }
                 PlaybackBarOutput::Next => {
                     self.advance_track();
@@ -356,8 +345,7 @@ impl SimpleComponent for AppModel {
                     self.queue.push(path);
                 }
                 ContentPaneOutput::AddToPlaylist(playlist_id, path) => {
-                    self.library_handle
-                        .add_to_playlist(playlist_id, path);
+                    self.library_handle.add_to_playlist(playlist_id, path);
                 }
                 ContentPaneOutput::AddToNewPlaylist(_name, path) => {
                     self.show_new_playlist_dialog(path);
@@ -381,10 +369,11 @@ impl SimpleComponent for AppModel {
 impl AppModel {
     fn play_track_at(&mut self, idx: usize) {
         if let Some(ref mut pb) = self.playback
-            && let Some(path) = self.queue.tracks.get(idx) {
-                pb.play_file(path);
-                self.update_current_track();
-            }
+            && let Some(path) = self.queue.tracks.get(idx)
+        {
+            pb.play_file(path);
+            self.update_current_track();
+        }
     }
 
     fn advance_track(&mut self) {
@@ -397,9 +386,10 @@ impl AppModel {
             }
             self.queue.current = None;
             self.current_track_path = None;
-            let _ = self.content_pane.sender().send(
-                ContentPaneMsg::CurrentTrackPath(None),
-            );
+            let _ = self
+                .content_pane
+                .sender()
+                .send(ContentPaneMsg::CurrentTrackPath(None));
         }
     }
 
@@ -491,9 +481,10 @@ impl AppModel {
             if resp == gtk4::ResponseType::Accept {
                 let name = entry.text().to_string();
                 if !name.is_empty()
-                    && let Ok(id) = lib.create_playlist(&name) {
-                        lib.add_to_playlist(id, song_path.clone());
-                    }
+                    && let Ok(id) = lib.create_playlist(&name)
+                {
+                    lib.add_to_playlist(id, song_path.clone());
+                }
             }
             d.close();
         });
@@ -522,11 +513,12 @@ impl AppModel {
             if resp == gtk4::ResponseType::Accept {
                 let name = entry.text().to_string();
                 if !name.is_empty()
-                    && let Ok(id) = lib.create_playlist(&name) {
-                        for path in &tracks {
-                            lib.add_to_playlist(id, path.clone());
-                        }
+                    && let Ok(id) = lib.create_playlist(&name)
+                {
+                    for path in &tracks {
+                        lib.add_to_playlist(id, path.clone());
                     }
+                }
             }
             d.close();
         });

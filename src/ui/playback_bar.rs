@@ -225,22 +225,24 @@ impl SimpleComponent for PlaybackBar {
         // Volume scale → Input
         {
             let s = sender.clone();
-            widgets.volume_scale.connect_change_value(move |_, _, value| {
-                s.input(PlaybackBarMsg::VolumeChanged(value / 100.0));
-                gtk4::glib::Propagation::Proceed
-            });
+            widgets
+                .volume_scale
+                .connect_change_value(move |_, _, value| {
+                    s.input(PlaybackBarMsg::VolumeChanged(value / 100.0));
+                    gtk4::glib::Propagation::Proceed
+                });
         }
 
         // Track progress scale → Input
         {
             let s = sender.clone();
-            widgets.track_progress_scale.connect_change_value(
-                move |scale, _, value| {
+            widgets
+                .track_progress_scale
+                .connect_change_value(move |scale, _, value| {
                     let seconds = value * scale.adjustment().upper();
                     s.input(PlaybackBarMsg::Seek(seconds));
                     gtk4::glib::Propagation::Proceed
-                },
-            );
+                });
         }
 
         // Volume revealer: slider hidden until hover, slides out left
@@ -329,8 +331,7 @@ impl SimpleComponent for PlaybackBar {
                     self.current_track_label.set_label(&label);
                 }
                 PlaybackEvent::Position { elapsed, duration } => {
-                    self.track_progress_scale
-                        .set_range(0.0, duration);
+                    self.track_progress_scale.set_range(0.0, duration);
                     self.track_progress_scale.set_value(elapsed);
                     self.elapsed_time_label
                         .set_label(&widgets::format_time(elapsed));

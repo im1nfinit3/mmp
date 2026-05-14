@@ -7,8 +7,8 @@
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
-use crate::ui::Page;
 use crate::library::db;
+use crate::ui::Page;
 
 // ---------------------------------------------------------------------------
 // Model
@@ -151,17 +151,14 @@ impl SimpleComponent for NavPane {
                 let p = popover.clone();
                 btn.connect_clicked(move |_| {
                     // Trigger CreatePlaylist output — parent shows dialog
-                    s.output(NavPaneOutput::CreatePlaylist(String::new()))
-                        .ok();
+                    s.output(NavPaneOutput::CreatePlaylist(String::new())).ok();
                     p.popdown();
                 });
                 vbox.append(&btn);
 
                 popover.set_child(Some(&vbox));
                 popover.set_parent(&row);
-                let rect = gtk4::gdk::Rectangle::new(
-                    x as i32, y as i32, 1, 1,
-                );
+                let rect = gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
                 popover.set_pointing_to(Some(&rect));
                 popover.popup();
             });
@@ -238,7 +235,9 @@ impl NavPane {
             let gesture = gtk4::GestureClick::new();
             gesture.set_button(3);
             gesture.connect_pressed(move |_, _n, x, y| {
-                let Some(row) = row_weak.upgrade() else { return };
+                let Some(row) = row_weak.upgrade() else {
+                    return;
+                };
 
                 let popover = gtk4::Popover::new();
                 let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -250,10 +249,8 @@ impl NavPane {
                 let s1 = s.clone();
                 let p1 = popover.clone();
                 rename_btn.connect_clicked(move |_| {
-                    s1.output(NavPaneOutput::RenamePlaylist(
-                        pl_id,
-                        String::new(),
-                    )).ok();
+                    s1.output(NavPaneOutput::RenamePlaylist(pl_id, String::new()))
+                        .ok();
                     p1.popdown();
                 });
                 vbox.append(&rename_btn);
@@ -264,17 +261,14 @@ impl NavPane {
                 let s2 = s.clone();
                 let p2 = popover.clone();
                 delete_btn.connect_clicked(move |_| {
-                    s2.output(NavPaneOutput::DeletePlaylist(pl_id))
-                        .ok();
+                    s2.output(NavPaneOutput::DeletePlaylist(pl_id)).ok();
                     p2.popdown();
                 });
                 vbox.append(&delete_btn);
 
                 popover.set_child(Some(&vbox));
                 popover.set_parent(&row);
-                let rect = gtk4::gdk::Rectangle::new(
-                    x as i32, y as i32, 1, 1,
-                );
+                let rect = gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
                 popover.set_pointing_to(Some(&rect));
                 popover.popup();
             });

@@ -9,14 +9,14 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use relm4::prelude::*;
 use relm4::RelmRemoveAllExt;
+use relm4::prelude::*;
 
-use crate::ui::Page;
+use crate::library::LibraryHandle;
 use crate::library::db::{self};
 use crate::library::song::Song;
-use crate::library::LibraryHandle;
 use crate::playback::PlaybackEvent;
+use crate::ui::Page;
 
 // ---------------------------------------------------------------------------
 // Model
@@ -162,18 +162,15 @@ impl SimpleComponent for ContentPane {
                 let s = s.clone();
                 let p = popover.clone();
                 btn.connect_clicked(move |_| {
-                    s.output(ContentPaneOutput::SaveQueueAsPlaylist(
-                        String::new(),
-                    )).ok();
+                    s.output(ContentPaneOutput::SaveQueueAsPlaylist(String::new()))
+                        .ok();
                     p.popdown();
                 });
                 vbox.append(&btn);
 
                 popover.set_child(Some(&vbox));
                 popover.set_parent(&qlb);
-                let rect = gtk4::gdk::Rectangle::new(
-                    x as i32, y as i32, 1, 1,
-                );
+                let rect = gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
                 popover.set_pointing_to(Some(&rect));
                 popover.popup();
             });
@@ -222,10 +219,8 @@ impl SimpleComponent for ContentPane {
                 let idx = row.index() as usize;
                 let p = paths.borrow();
                 if let Some(path) = p.get(idx) {
-                    s.output(ContentPaneOutput::PlayFromLibrary(
-                        path.clone(),
-                    ))
-                    .ok();
+                    s.output(ContentPaneOutput::PlayFromLibrary(path.clone()))
+                        .ok();
                 }
             });
         }
@@ -235,24 +230,26 @@ impl SimpleComponent for ContentPane {
             let s = sender.clone();
             albums_list_box.connect_row_activated(move |_, row| {
                 if let Some(child) = row.child()
-                    && let Some(label) = child.downcast_ref::<gtk4::Label>() {
-                        s.output(ContentPaneOutput::NavSongsWithSearch(
-                            label.label().to_string(),
-                        ))
-                        .ok();
-                    }
+                    && let Some(label) = child.downcast_ref::<gtk4::Label>()
+                {
+                    s.output(ContentPaneOutput::NavSongsWithSearch(
+                        label.label().to_string(),
+                    ))
+                    .ok();
+                }
             });
         }
         {
             let s = sender.clone();
             artists_list_box.connect_row_activated(move |_, row| {
                 if let Some(child) = row.child()
-                    && let Some(label) = child.downcast_ref::<gtk4::Label>() {
-                        s.output(ContentPaneOutput::NavSongsWithSearch(
-                            label.label().to_string(),
-                        ))
-                        .ok();
-                    }
+                    && let Some(label) = child.downcast_ref::<gtk4::Label>()
+                {
+                    s.output(ContentPaneOutput::NavSongsWithSearch(
+                        label.label().to_string(),
+                    ))
+                    .ok();
+                }
             });
         }
 
@@ -338,29 +335,27 @@ impl ContentPane {
         let search = self.search_lowered.clone();
         let artist = self.selected_artist.clone();
         let album = self.selected_album.clone();
-        let filter: Box<dyn Fn(&Song) -> bool + Send + 'static> =
-            Box::new(move |song| {
-                if !search.is_empty() {
-                    let tl = song.title.to_lowercase();
-                    let al = song.artist.to_lowercase();
-                    let bl = song.album.to_lowercase();
-                    if !tl.contains(&search)
-                        && !al.contains(&search)
-                        && !bl.contains(&search)
-                    {
-                        return false;
-                    }
+        let filter: Box<dyn Fn(&Song) -> bool + Send + 'static> = Box::new(move |song| {
+            if !search.is_empty() {
+                let tl = song.title.to_lowercase();
+                let al = song.artist.to_lowercase();
+                let bl = song.album.to_lowercase();
+                if !tl.contains(&search) && !al.contains(&search) && !bl.contains(&search) {
+                    return false;
                 }
-                if let Some(ref a) = artist
-                    && song.artist != *a {
-                        return false;
-                    }
-                if let Some(ref a) = album
-                    && song.album != *a {
-                        return false;
-                    }
-                true
-            });
+            }
+            if let Some(ref a) = artist
+                && song.artist != *a
+            {
+                return false;
+            }
+            if let Some(ref a) = album
+                && song.album != *a
+            {
+                return false;
+            }
+            true
+        });
         self.library_handle.get_songs(filter)
     }
 
@@ -427,24 +422,27 @@ impl ContentPane {
         let gesture = gtk4::GestureClick::new();
         gesture.set_button(3); // right button
         gesture.connect_pressed(move |_gesture, _n_press, x, y| {
-            let Some(_row) = row_weak.upgrade() else { return };
-            let Some(row_box) = row_box_weak.upgrade() else { return };
+            let Some(_row) = row_weak.upgrade() else {
+                return;
+            };
+            let Some(row_box) = row_box_weak.upgrade() else {
+                return;
+            };
 
             // Check which playlists already contain this song
-            let in_playlists: Rc<std::collections::HashSet<i64>> =
-                Rc::new(
-                    lib.get_playlists()
-                        .iter()
-                        .filter_map(|pl| {
-                            let songs = lib.get_playlist_songs(pl.id);
-                            if songs.iter().any(|s| s.path == path) {
-                                Some(pl.id)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                );
+            let in_playlists: Rc<std::collections::HashSet<i64>> = Rc::new(
+                lib.get_playlists()
+                    .iter()
+                    .filter_map(|pl| {
+                        let songs = lib.get_playlist_songs(pl.id);
+                        if songs.iter().any(|s| s.path == path) {
+                            Some(pl.id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            );
 
             let popover = gtk4::Popover::new();
             let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -479,10 +477,9 @@ impl ContentPane {
                 let p = popover.clone();
                 btn.connect_clicked(move |_| {
                     if !in_pl.contains(&pl_id) {
-                        sender.output(ContentPaneOutput::AddToPlaylist(
-                            pl_id,
-                            path_c.clone(),
-                        )).ok();
+                        sender
+                            .output(ContentPaneOutput::AddToPlaylist(pl_id, path_c.clone()))
+                            .ok();
                     }
                     p.popdown();
                 });
@@ -500,19 +497,19 @@ impl ContentPane {
             let sender = sender.clone();
             let p = popover.clone();
             new_btn.connect_clicked(move |_| {
-                sender.output(ContentPaneOutput::AddToNewPlaylist(
-                    String::new(),
-                    path_c.clone(),
-                )).ok();
+                sender
+                    .output(ContentPaneOutput::AddToNewPlaylist(
+                        String::new(),
+                        path_c.clone(),
+                    ))
+                    .ok();
                 p.popdown();
             });
             vbox.append(&new_btn);
 
             popover.set_child(Some(&vbox));
             popover.set_parent(&row_box);
-            let rect = gtk4::gdk::Rectangle::new(
-                x as i32, y as i32, 1, 1,
-            );
+            let rect = gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
             popover.set_pointing_to(Some(&rect));
             popover.popup();
         });
@@ -520,9 +517,10 @@ impl ContentPane {
 
         // Highlight currently-playing track
         if let Some(ref current) = self.current_track_path
-            && song.path == *current {
-                row.add_css_class("current-track");
-            }
+            && song.path == *current
+        {
+            row.add_css_class("current-track");
+        }
 
         row
     }
