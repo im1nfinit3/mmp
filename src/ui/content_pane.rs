@@ -284,7 +284,7 @@ impl SimpleComponent for ContentPane {
             }
             ContentPaneMsg::CurrentTrackPath(path) => {
                 self.current_track_path = path;
-                self.sync_lists();
+                self.update_current_track_highlight();
             }
             ContentPaneMsg::PlaybackEvent(_event) => {
                 // Handled for current-track highlighting if needed
@@ -350,6 +350,22 @@ impl ContentPane {
             let row = self.build_song_row(song);
             paths.push(song.path.clone());
             self.song_list_box.append(&row);
+        }
+    }
+
+    fn update_current_track_highlight(&self) {
+        let paths = self.displayed_song_paths.borrow();
+
+        for (idx, path) in paths.iter().enumerate() {
+            let Some(row) = self.song_list_box.row_at_index(idx as i32) else {
+                continue;
+            };
+
+            if self.current_track_path.as_ref() == Some(path) {
+                row.add_css_class("current-track");
+            } else {
+                row.remove_css_class("current-track");
+            }
         }
     }
 
