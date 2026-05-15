@@ -7,7 +7,8 @@
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
-use crate::playback::{PlaybackEvent, PlaybackState};
+use crate::library::song::RepeatMode;
+use crate::playback::{PlaybackEvent, PlaybackState, QueueState};
 use crate::ui::widgets;
 
 // ---------------------------------------------------------------------------
@@ -65,8 +66,12 @@ pub enum PlaybackBarMsg {
     MuteClicked,
     /// User clicked shuffle.
     ShuffleClicked,
+    /// Set shuffle active/inactive (from parent).
+    SetShuffle(bool),
     /// User clicked repeat.
     RepeatClicked,
+    /// Set repeat mode (All -> One -> Off).
+    SetRepeat(RepeatMode),
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +338,39 @@ impl SimpleComponent for PlaybackBar {
             }
             PlaybackBarMsg::RepeatClicked => {
                 let _ = sender.output(PlaybackBarOutput::RepeatToggled);
+            }
+            PlaybackBarMsg::SetShuffle(enabled) => {
+                self.shuffle = enabled;
+                if enabled {
+                    self.shuffle_button
+                        .add_css_class("active-control");
+                } else {
+                    self.shuffle_button
+                        .remove_css_class("active-control");
+                }
+            }
+            PlaybackBarMsg::SetRepeat(mode) => {
+                self.repeat = mode;
+                match mode {
+                    RepeatMode::All => {
+                        self.repeat_button
+                        .add_css_class("active-control");
+                        self.repeat_button
+                        .set_icon_name("media-playlist-repeat-symbolic");
+                    },
+                    RepeatMode::One => {
+                        self.repeat_button
+                        .add_css_class("active-control");
+                        self.repeat_button
+                        .set_icon_name("media-playlist-repeat-one-symbolic");
+                    },
+                    RepeatMode::Off => {
+                        self.repeat_button
+                        .remove_css_class("active-control");
+                        self.repeat_button
+                        .set_icon_name("media-playlist-repeat-symbolic");
+                    }
+                }
             }
             PlaybackBarMsg::PlaybackEvent(event) => match event {
                 PlaybackEvent::Tags { title, artist } => {
