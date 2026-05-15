@@ -339,6 +339,11 @@ impl SimpleComponent for AppModel {
                     if self.queue.current.is_none() {
                         self.queue.current = Some(idx);
                         self.play_track_at(idx);
+                    } else {
+                        if let Some(ref mut pb) = self.playback {
+                            pb.stop();
+                            self.play_track_at(idx);
+                        }
                     }
                 }
                 ContentPaneOutput::QueueFromLibrary(path) => {
