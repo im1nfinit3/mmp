@@ -238,8 +238,8 @@ impl SimpleComponent for PlaybackBar {
             let s = sender.clone();
             widgets
                 .track_progress_scale
-                .connect_change_value(move |scale, _, value| {
-                    let seconds = value * scale.adjustment().upper();
+                .connect_change_value(move |_, _, value| {
+                    let seconds = value;
                     s.input(PlaybackBarMsg::Seek(seconds));
                     gtk4::glib::Propagation::Proceed
                 });
