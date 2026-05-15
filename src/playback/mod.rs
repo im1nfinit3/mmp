@@ -113,8 +113,15 @@ impl Playback {
 
     /// Play the file at `path`. Returns immediately; playback starts async.
     pub fn play_file(&mut self, path: &Path) {
+        let uri = match glib::filename_to_uri(path, None) {
+            Ok(uri) => uri,
+            Err(err) => {
+                eprintln!("file error: {:?}", err);
+                return;
+            }
+        };
         self.playbin
-            .set_property("uri", format!("file://{}", path.display()));
+            .set_property("uri", uri);
         let _ = self.playbin.set_state(gst::State::Playing);
         self.start_ui_timer();
         self.event_tx
