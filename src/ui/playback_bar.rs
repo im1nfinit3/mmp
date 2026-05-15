@@ -307,9 +307,25 @@ impl SimpleComponent for PlaybackBar {
                 let _ = sender.output(PlaybackBarOutput::Seek(secs));
             }
             PlaybackBarMsg::VolumeChanged(vol) => {
+                if vol > 0.0 {
+                    self.muted = false;
+                    self.mute_button
+                        .set_icon_name("audio-volume-medium-symbolic");
+                } else {
+                    self.muted = true;
+                    self.mute_button
+                        .set_icon_name("audio-volume-muted-symbolic");
+                }
                 let _ = sender.output(PlaybackBarOutput::VolumeChanged(vol));
             }
             PlaybackBarMsg::MuteClicked => {
+                self.muted = !self.muted;
+                let icon = if self.muted {
+                    "audio-volume-muted-symbolic"
+                } else {
+                    "audio-volume-medium-symbolic"
+                };
+                self.mute_button.set_icon_name(icon);
                 let _ = sender.output(PlaybackBarOutput::MuteToggled);
             }
             PlaybackBarMsg::ShuffleClicked => {
