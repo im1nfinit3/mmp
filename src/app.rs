@@ -110,6 +110,12 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // On platforms without a native GTK theme integration, default to GTK's
+        // dark palette so the app's explicit dark styling stays readable.
+        if let Some(settings) = gtk4::Settings::default() {
+            settings.set_gtk_application_prefer_dark_theme(true);
+        }
+
         // Load CSS
         let css_provider = gtk4::CssProvider::new();
         css_provider.load_from_data(include_str!("ui/style.css"));
