@@ -1,153 +1,116 @@
-use std::collections::BTreeSet;
+use std::path::Path;
+use std::time::Duration;
 
-use gstreamer as gst;
-use gstreamer_pbutils::prelude::*;
-use gstreamer_pbutils::{DiscovererInfo, DiscovererStreamInfo};
+use lofty::file::{TaggedFile, TaggedFileExt};
+use lofty::tag::Accessor;
+use rodio::{Decoder, Source};
 
 use super::song::Song;
 
-#[derive(Default)]
-struct TagFields {
-    title: Option<String>,
-    artist: Option<String>,
-    album: Option<String>,
+pub const SUPPORTED_EXTENSIONS: [&str; 5] = ["mp3", "flac", "ogg", "wav", "m4a"];
+
+#[derive(Clone, Debug, Default)]
+pub struct TrackMetadata {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<Duration>,
 }
 
-impl TagFields {
-    fn apply_tag_list(&mut self, tags: &gst::TagList) {
-        if self.title.is_none()
-            && let Some(title) = first_tag_value::<gst::tags::Title>(tags)
-        {
-            self.title = Some(title);
+impl TrackMetadata {
+    pub fn apply_to_song(&self, song: &mut Song) {
+        if let Some(title) = self.title.as_ref() {
+            song.title = title.clone();
         }
-
-        if self.artist.is_none() 
-            && let Some(artist) = first_tag_value::<gst::tags::Artist>(tags)
-        {
-            self.artist = Some(artist);
+        if let Some(artist) = self.artist.as_ref() {
+            song.artist = artist.clone();
         }
-
-        if self.album.is_none()
-            && let Some(album) = first_tag_value::<gst::tags::Album>(tags)
-        {
-            self.album = Some(album);
+        if let Some(album) = self.album.as_ref() {
+            song.album = album.clone();
         }
-    }
-
-    fn apply_stream_info(&mut self, stream: &impl IsA<DiscovererStreamInfo>) {
-        if let Some(tags) = stream.tags() {
-            self.apply_tag_list(&tags);
+        if let Some(duration) = self.duration {
+            song.duration_str = format_duration(duration);
         }
-    }
-
-    fn apply_to_song(self, song: &mut Song) {
-        if let Some(title) = self.title {
-            song.title = title;
-        }
-        if let Some(artist) = self.artist {
-            song.artist = artist;
-        }
-        if let Some(album) = self.album {
-            song.album = album;
-        }
-    }
-
-    fn has_missing_fields(&self) -> bool {
-        self.title.is_none() || self.artist.is_none() || self.album.is_none()
     }
 }
 
-pub fn apply_discoverer_tags(song: &mut Song, info: &DiscovererInfo) {
-    let mut fields = TagFields::default();
+pub fn is_supported_audio_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .is_some_and(|ext| SUPPORTED_EXTENSIONS.contains(&ext.as_str()))
+}
 
-    if let Some(stream) = info.stream_info() {
-        fields.apply_stream_info(&stream);
+pub fn read_track_metadata(path: &Path) -> Result<TrackMetadata, String> {
+    let tagged_file = lofty::read_from_path(path)
+        .map_err(|err| format!("failed to read tags for {}: {err}", path.display()))?;
+
+    let mut metadata = TrackMetadata::default();
+    apply_lofty_tags(&mut metadata, &tagged_file);
+    metadata.duration = read_duration_value(path);
+    Ok(metadata)
+}
+
+pub fn apply_lofty_tags(metadata: &mut TrackMetadata, tagged_file: &TaggedFile) {
+    let primary = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+
+    if let Some(tag) = primary {
+        metadata.title = metadata
+            .title
+            .take()
+            .or_else(|| sanitized(tag.title().as_deref()));
+        metadata.artist = metadata
+            .artist
+            .take()
+            .or_else(|| sanitized(tag.artist().as_deref()));
+        metadata.album = metadata
+            .album
+            .take()
+            .or_else(|| sanitized(tag.album().as_deref()));
     }
 
-    for stream in info.stream_list() {
-        fields.apply_stream_info(&stream);
+    if metadata.title.is_some() && metadata.artist.is_some() && metadata.album.is_some() {
+        return;
     }
 
-    for audio in info.audio_streams() {
-        fields.apply_stream_info(&audio);
-    }
-
-    for container in info.container_streams() {
-        fields.apply_stream_info(&container);
-        if let Some(tags) = container.tags() {
-            fields.apply_tag_list(&tags);
+    for tag in tagged_file.tags() {
+        if metadata.title.is_none() {
+            metadata.title = sanitized(tag.title().as_deref());
         }
-    }
-
-    if fields.has_missing_fields() {
-        // DiscovererInfo::tags() is deprecated since GStreamer 1.20, but it
-        // still provides merged tags for files where stream/container tags only
-        // expose container-private data such as QuickTime atoms.
-        #[allow(deprecated)]
-        if let Some(tags) = info.tags() {
-            fields.apply_tag_list(&tags);
+        if metadata.artist.is_none() {
+            metadata.artist = sanitized(tag.artist().as_deref());
         }
-    }
-
-    fields.apply_to_song(song);
-
-    if std::env::var_os("MMP_DEBUG_METADATA").is_some() && !song.has_complete_metadata() {
-        eprintln!(
-            "Incomplete metadata for {}: title={:?}, artist={:?}, album={:?}, duration={:?}, tags={:?}",
-            song.path.display(),
-            song.title,
-            song.artist,
-            song.album,
-            song.duration_str,
-            collect_tag_names(info)
-        );
+        if metadata.album.is_none() {
+            metadata.album = sanitized(tag.album().as_deref());
+        }
+        if metadata.title.is_some() && metadata.artist.is_some() && metadata.album.is_some() {
+            break;
+        }
     }
 }
 
-fn first_tag_value<'a, T>(tags: &'a gst::TagList) -> Option<String>
-where
-    T: gst::tags::Tag<'a, TagType = &'a str>,
-{
-    tags.get::<T>()
-        .map(|value| value.get().trim().to_string())
+pub fn read_duration(path: &Path) -> Option<String> {
+    read_duration_value(path).map(format_duration)
+}
+
+pub fn read_duration_value(path: &Path) -> Option<Duration> {
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = Decoder::try_from(file).ok()?;
+    decoder.total_duration()
+}
+
+pub fn format_duration(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let mins = total_secs / 60;
+    let secs = total_secs % 60;
+    format!("{}:{:02}", mins, secs)
+}
+
+fn sanitized(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-}
-
-fn collect_tag_names(info: &DiscovererInfo) -> Vec<String> {
-    let mut names = BTreeSet::new();
-
-    if let Some(stream) = info.stream_info() {
-        collect_stream_tag_names(&mut names, &stream);
-    }
-
-    for stream in info.stream_list() {
-        collect_stream_tag_names(&mut names, &stream);
-    }
-
-    for audio in info.audio_streams() {
-        collect_stream_tag_names(&mut names, &audio);
-    }
-
-    for container in info.container_streams() {
-        collect_stream_tag_names(&mut names, &container);
-        if let Some(tags) = container.tags() {
-            collect_tag_list_names(&mut names, &tags);
-        }
-    }
-
-    names.into_iter().collect()
-}
-
-fn collect_stream_tag_names(names: &mut BTreeSet<String>, stream: &impl IsA<DiscovererStreamInfo>) {
-    if let Some(tags) = stream.tags() {
-        collect_tag_list_names(names, &tags);
-    }
-}
-
-fn collect_tag_list_names(names: &mut BTreeSet<String>, tags: &gst::TagList) {
-    for idx in 0..tags.n_tags() {
-        if let Some(name) = tags.nth_tag_name(idx) {
-            names.insert(name.to_string());
-        }
-    }
+        .map(ToOwned::to_owned)
 }

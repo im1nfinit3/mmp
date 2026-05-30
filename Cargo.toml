@@ -11,9 +11,10 @@ glib = "0.22"
 relm4 = { version = "0.11", features = ["macros"] }
 relm4-components = "0.11"
 
-# GStreamer for audio playback and metadata
-gstreamer = { version = "0.25", features = ["v1_20"] }
-gstreamer-pbutils = { version = "0.25", features = ["v1_20"] }
+# Rust-native audio playback and metadata
+lofty = "0.24"
+rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4"] }
+symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 
 # SQLite for library and playlists
 rusqlite = { version = "0.35", features = ["bundled"] }

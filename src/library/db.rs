@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use super::song::Song;
 
-pub const CURRENT_METADATA_VERSION: i64 = 1;
+pub const CURRENT_METADATA_VERSION: i64 = 2;
 
 /// A named playlist from the database.
 #[derive(Clone, Debug)]

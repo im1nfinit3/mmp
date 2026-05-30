@@ -314,16 +314,16 @@ impl SimpleComponent for AppModel {
                 PlaybackBarOutput::ShuffleToggled => {
                     self.queue.toggle_shuffle();
                     let _ = self
-                    .playback_bar
-                    .sender()
-                    .send(PlaybackBarMsg::SetShuffle(self.queue.shuffle));
+                        .playback_bar
+                        .sender()
+                        .send(PlaybackBarMsg::SetShuffle(self.queue.shuffle));
                 }
                 PlaybackBarOutput::RepeatToggled => {
                     self.queue.cycle_repeat();
                     let _ = self
-                    .playback_bar
-                    .sender()
-                    .send(PlaybackBarMsg::SetRepeat(self.queue.repeat));
+                        .playback_bar
+                        .sender()
+                        .send(PlaybackBarMsg::SetRepeat(self.queue.repeat));
                 }
             },
 
