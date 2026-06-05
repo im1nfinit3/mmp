@@ -1,547 +1,1403 @@
-//! Application state, data model, and Relm4 top-level component.
-//!
-//! The parent coordinator: owns LibraryHandle, Playback, QueueState,
-//! and three sub-components (PlaybackBar, NavPane, ContentPane).
-
 use std::path::PathBuf;
-use std::sync::mpsc;
 
-use gtk4::prelude::*;
-use relm4::prelude::*;
+use iced::task::Task;
+use iced::widget::{
+    Space, button, column, container, mouse_area, opaque, row, scrollable, slider,
+    stack, svg, text, text_input,
+};
+use iced::{
+    Alignment, Background, Border, Color, Element, Length, Point, Settings, Shadow, Subscription,
+    Theme,
+    application,
+};
 
-use crate::library::scan;
-use crate::library::{LibraryEvent, LibraryHandle};
-use crate::playback::{Playback, PlaybackEvent, QueueState};
-use crate::ui::Page;
-use crate::ui::content_pane::{ContentPane, ContentPaneMsg, ContentPaneOutput};
-use crate::ui::nav_pane::{NavPane, NavPaneMsg, NavPaneOutput};
-use crate::ui::playback_bar::{PlaybackBar, PlaybackBarMsg, PlaybackBarOutput};
+use crate::system_accent::{self, UiPalette};
+use crate::app_core::{
+    ActiveModal, AppCore, AppEffect, AppIntent, AppState, Page, PlaybackStatus, SongView,
+};
+use crate::library::song::RepeatMode;
 
-// ---------------------------------------------------------------------------
-// Messages
-// ---------------------------------------------------------------------------
+const ICON_PREVIOUS: &[u8] = include_bytes!("icons/previous.svg");
+const ICON_PLAY: &[u8] = include_bytes!("icons/play.svg");
+const ICON_PAUSE: &[u8] = include_bytes!("icons/pause.svg");
+const ICON_NEXT: &[u8] = include_bytes!("icons/next.svg");
+const ICON_VOLUME_HIGH: &[u8] = include_bytes!("icons/volume-high.svg");
+const ICON_VOLUME_MUTE: &[u8] = include_bytes!("icons/volume-mute.svg");
+const ICON_SHUFFLE_OFF: &[u8] = include_bytes!("icons/shuffle-off.svg");
+const ICON_SHUFFLE_ON: &[u8] = include_bytes!("icons/shuffle.svg");
+const ICON_REPEAT_ALL: &[u8] = include_bytes!("icons/repeat-all.svg");
+const ICON_REPEAT_ONE: &[u8] = include_bytes!("icons/repeat-one.svg");
+
+pub fn run() -> iced::Result {
+    let startup_palette = system_accent::load_startup_palette();
+
+    application(move || boot(startup_palette), update, view)
+        .title(title)
+        .theme(theme)
+        .subscription(subscription)
+        .settings(Settings::default())
+        .window_size((1240.0, 820.0))
+        .run()
+}
+
+struct App {
+    core: AppCore,
+    active_modal: Option<ActiveModal>,
+    notification: Option<String>,
+    context_menu: Option<ContextMenu>,
+    cursor_position: Point,
+    palette: UiPalette,
+}
 
 #[derive(Debug, Clone)]
-pub enum AppMsg {
-    // -- Routed from PlaybackBar --
-    PlaybackBarOutput(PlaybackBarOutput),
-    // -- Routed from NavPane --
-    NavPaneOutput(NavPaneOutput),
-    // -- Routed from ContentPane --
-    ContentPaneOutput(ContentPaneOutput),
-    // -- App-level --
+enum Message {
     Tick,
+    Intent(AppIntent),
+    OpenSongMenu {
+        path: PathBuf,
+        queue_index: Option<usize>,
+    },
+    OpenPlaylistMenu(i64),
+    CloseContextMenu,
+    CursorMoved(Point),
+    ModalTextChanged(String),
+    ModalConfirm,
+    ModalCancel,
+    ClearNotification,
 }
 
-// ---------------------------------------------------------------------------
-// App state
-// ---------------------------------------------------------------------------
-
-pub struct AppModel {
-    pub library_handle: LibraryHandle,
-    pub library_rx: Option<mpsc::Receiver<LibraryEvent>>,
-    pub queue: QueueState,
-    pub playback: Option<Playback>,
-    pub playback_rx: Option<mpsc::Receiver<PlaybackEvent>>,
-    pub volume: f64,
-    pub muted: bool,
-    /// PlaybackBar sub-component controller.
-    playback_bar: relm4::Controller<PlaybackBar>,
-    /// NavPane sub-component controller.
-    nav_pane: relm4::Controller<NavPane>,
-    /// ContentPane sub-component controller.
-    content_pane: relm4::Controller<ContentPane>,
-    /// Current track path (for forwarding to ContentPane).
-    current_track_path: Option<PathBuf>,
+fn boot(startup_palette: UiPalette) -> (App, Task<Message>) {
+    (
+        App {
+            core: AppCore::new(),
+            active_modal: None,
+            notification: None,
+            context_menu: None,
+            cursor_position: Point::ORIGIN,
+            palette: startup_palette,
+        },
+        Task::none(),
+    )
 }
 
-// ---------------------------------------------------------------------------
-// Relm4 component
-// ---------------------------------------------------------------------------
+fn title(_app: &App) -> String {
+    String::from("My Music Player (mmp)")
+}
 
-#[relm4::component(pub)]
-impl SimpleComponent for AppModel {
-    type Init = ();
-    type Input = AppMsg;
-    type Output = ();
+fn theme(_app: &App) -> Theme {
+    Theme::Dark
+}
 
-    view! {
-        #[root]
-        window = gtk4::Window {
-            set_default_size: (900, 600),
-            set_title: Some("My Music Player (mmp)"),
+fn subscription(_app: &App) -> Subscription<Message> {
+    iced::time::every(std::time::Duration::from_millis(200)).map(|_| Message::Tick)
+}
 
-            gtk4::Box {
-                set_orientation: gtk4::Orientation::Vertical,
-                set_css_classes: &["app-root"],
+fn update(app: &mut App, message: Message) -> Task<Message> {
+    let effects = match message {
+        Message::Tick => app.core.tick(),
+        Message::Intent(intent) => {
+            app.context_menu = None;
+            app.core.handle_intent(intent)
+        }
+        Message::OpenSongMenu { path, queue_index } => {
+            let playlist_memberships = app.core.song_playlist_memberships(&path);
+            let current_playlist_id = app.core.current_playlist_id();
+            let playlists = app
+                .core
+                .state()
+                .playlists
+                .iter()
+                .map(|playlist| SongPlaylistMenuItem {
+                    id: playlist.id,
+                    name: playlist.name.clone(),
+                    contains_song: playlist_memberships.contains(&playlist.id),
+                })
+                .collect();
+            app.context_menu = Some(ContextMenu::Song {
+                path,
+                position: app.cursor_position,
+                current_playlist_id,
+                queue_index,
+                playlists,
+            });
+            Vec::new()
+        }
+        Message::OpenPlaylistMenu(id) => {
+            app.context_menu = Some(ContextMenu::Playlist {
+                id,
+                position: app.cursor_position,
+            });
+            Vec::new()
+        }
+        Message::CloseContextMenu => {
+            app.context_menu = None;
+            Vec::new()
+        }
+        Message::CursorMoved(point) => {
+            app.cursor_position = point;
+            Vec::new()
+        }
+        Message::ModalTextChanged(value) => {
+            if let Some(modal) = app.active_modal.as_mut() {
+                match modal {
+                    ActiveModal::CreatePlaylist { name }
+                    | ActiveModal::RenamePlaylist { name, .. }
+                    | ActiveModal::CreatePlaylistAndAddSong { name, .. }
+                    | ActiveModal::SaveQueueAsPlaylist { name } => *name = value,
+                }
+            }
+            Vec::new()
+        }
+        Message::ModalConfirm => {
+            let Some(modal) = app.active_modal.clone() else {
+                return Task::none();
+            };
 
-                // Placeholder for PlaybackBar
-                #[name(playback_bar_slot)]
-                gtk4::Box {},
+            let should_close = match &modal {
+                ActiveModal::CreatePlaylist { name }
+                | ActiveModal::RenamePlaylist { name, .. }
+                | ActiveModal::CreatePlaylistAndAddSong { name, .. }
+                | ActiveModal::SaveQueueAsPlaylist { name } => !name.trim().is_empty(),
+            };
 
-                gtk4::Separator {
-                    set_orientation: gtk4::Orientation::Horizontal,
-                },
+            let mut effects = match modal {
+                ActiveModal::CreatePlaylist { name } => {
+                    app.core.handle_intent(AppIntent::ConfirmCreatePlaylist(name))
+                }
+                ActiveModal::RenamePlaylist { id, name } => {
+                    app.core.handle_intent(AppIntent::ConfirmRenamePlaylist { id, name })
+                }
+                ActiveModal::CreatePlaylistAndAddSong { path, name } => app
+                    .core
+                    .handle_intent(AppIntent::ConfirmCreatePlaylistAndAddSong { name, path }),
+                ActiveModal::SaveQueueAsPlaylist { name } => {
+                    app.core.handle_intent(AppIntent::ConfirmSaveQueueAsPlaylist(name))
+                }
+            };
 
-                #[name(main_shell)]
-                gtk4::Box {
-                    set_orientation: gtk4::Orientation::Horizontal,
-                    set_hexpand: true,
-                    set_vexpand: true,
-                    set_css_classes: &["main-shell"],
+            if should_close
+                && !effects
+                    .iter()
+                    .any(|effect| matches!(effect, AppEffect::OpenModal(_)))
+            {
+                effects.push(AppEffect::CloseModal);
+            }
 
-                    // Placeholder for NavPane
-                    #[name(nav_pane_slot)]
-                    gtk4::Box {},
+            effects
+        }
+        Message::ModalCancel => vec![AppEffect::CloseModal],
+        Message::ClearNotification => {
+            app.notification = None;
+            Vec::new()
+        }
+    };
 
-                    // Placeholder for ContentPane
-                    #[name(content_pane_slot)]
-                    gtk4::Box {
-                        set_hexpand: true,
-                        set_vexpand: true,
-                    },
-                },
-            },
+    apply_effects(app, effects)
+}
+
+fn apply_effects(app: &mut App, effects: Vec<AppEffect>) -> Task<Message> {
+    for effect in effects {
+        match effect {
+            AppEffect::OpenModal(modal) => app.active_modal = Some(modal),
+            AppEffect::CloseModal => app.active_modal = None,
+            AppEffect::ShowNotification(message) => app.notification = Some(message),
         }
     }
 
-    fn init(
-        _init: Self::Init,
-        root: Self::Root,
-        sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
-        // On platforms without a native GTK theme integration, default to GTK's
-        // dark palette so the app's explicit dark styling stays readable.
-        if let Some(settings) = gtk4::Settings::default() {
-            settings.set_gtk_application_prefer_dark_theme(true);
-        }
+    Task::none()
+}
 
-        // Load CSS
-        let css_provider = gtk4::CssProvider::new();
-        css_provider.load_from_data(include_str!("ui/style.css"));
-        gtk4::style_context_add_provider_for_display(
-            &gtk4::gdk::Display::default().expect("no display"),
-            &css_provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+fn view(app: &App) -> Element<'_, Message> {
+    let state = app.core.state();
+    let palette = &app.palette;
+
+    let body = mouse_area(
+        container(
+            column![
+                view_header(state, app.notification.as_deref(), palette),
+                row![view_nav(state, palette), view_content(state, palette)]
+                    .spacing(18)
+                    .height(Length::Fill)
+            ]
+            .spacing(18)
+            .height(Length::Fill),
+        )
+        .padding([22, 24])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(app_shell_style),
+    )
+    .on_move(Message::CursorMoved);
+
+    let mut layers: Vec<Element<'_, Message>> = vec![opaque(body).into()];
+
+    if let Some(context_menu) = &app.context_menu {
+        layers.push(opaque(view_context_menu_overlay(context_menu)).into());
+    }
+
+    if let Some(modal) = &app.active_modal {
+        layers.push(opaque(view_modal_overlay(state, modal, palette)).into());
+    }
+
+    stack(layers).width(Length::Fill).height(Length::Fill).into()
+}
+
+fn view_header<'a>(
+    state: &'a AppState,
+    notification: Option<&'a str>,
+    palette: &'a UiPalette,
+) -> Element<'a, Message> {
+    let play_icon = match state.playback {
+        PlaybackStatus::Playing => ICON_PAUSE,
+        PlaybackStatus::Paused | PlaybackStatus::Stopped => ICON_PLAY,
+    };
+
+    let controls = row![
+        icon_button(ICON_PREVIOUS, Message::Intent(AppIntent::Previous)),
+        icon_button(play_icon, Message::Intent(AppIntent::PlayPause)),
+        icon_button(ICON_NEXT, Message::Intent(AppIntent::Next)),
+        toggle_icon_button(
+            if state.shuffle {
+                ICON_SHUFFLE_ON
+            } else {
+                ICON_SHUFFLE_OFF
+            },
+            state.shuffle,
+            Message::Intent(AppIntent::ToggleShuffle),
+            palette,
+        ),
+        toggle_icon_button(
+            match state.repeat {
+                RepeatMode::Off | RepeatMode::All => ICON_REPEAT_ALL,
+                RepeatMode::One => ICON_REPEAT_ONE,
+            },
+            state.repeat != RepeatMode::Off,
+            Message::Intent(AppIntent::ToggleRepeat),
+            palette,
+        ),
+    ]
+    .spacing(10)
+    .width(336);
+
+    let progress = column![
+        text(&state.current_track_label).size(20),
+        row![
+            text(format_time(state.elapsed_seconds)).size(14).width(56),
+            slider(
+                0.0..=state.duration_seconds.max(1.0),
+                state.elapsed_seconds.min(state.duration_seconds.max(1.0)),
+                |value| Message::Intent(AppIntent::Seek(value))
+            )
+            .step(1.0)
+            .width(Length::Fill)
+            .style({
+                let palette = *palette;
+                move |theme, status| slider_style(theme, status, &palette)
+            }),
+            text(format_time(state.duration_seconds)).size(14).width(56),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+    ]
+    .spacing(12)
+    .width(Length::Fill);
+
+    let volume = row![
+        slider(0.0..=1.0, state.volume, |value| {
+            Message::Intent(AppIntent::SetVolume(value))
+        })
+        .step(0.01)
+        .width(140)
+        .style({
+            let palette = *palette;
+            move |theme, status| slider_style(theme, status, &palette)
+        }),
+        icon_button(
+            if state.muted {
+                ICON_VOLUME_MUTE
+            } else {
+                ICON_VOLUME_HIGH
+            },
+            Message::Intent(AppIntent::ToggleMute)
+        )
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center)
+    .width(236);
+
+    let mut header = column![row![controls, progress, volume]
+        .spacing(22)
+        .align_y(Alignment::Center)]
+    .spacing(14);
+
+    if let Some(note) = notification.or(state.status_message.as_deref()) {
+        header = header.push(
+            row![
+                text(note).size(13),
+                button("Dismiss")
+                    .padding([6, 10])
+                    .style(ghost_button_style)
+                    .on_press(Message::ClearNotification)
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
         );
-
-        let widgets = view_output!();
-
-        // -- Spawn Library actor --
-        let (lib_event_tx, lib_event_rx) = mpsc::channel();
-        let scan_event_tx = lib_event_tx.clone();
-        let library_handle = crate::library::spawn(lib_event_tx);
-
-        // -- Create PlaybackBar child --
-        let pb = PlaybackBar::builder()
-            .launch(())
-            .forward(sender.input_sender(), |msg: PlaybackBarOutput| {
-                AppMsg::PlaybackBarOutput(msg)
-            });
-        widgets.playback_bar_slot.append(pb.widget());
-
-        // -- Create NavPane child --
-        let nav = NavPane::builder()
-            .launch(())
-            .forward(sender.input_sender(), |msg: NavPaneOutput| {
-                AppMsg::NavPaneOutput(msg)
-            });
-        widgets.nav_pane_slot.append(nav.widget());
-
-        // -- Create ContentPane child --
-        let content = ContentPane::builder()
-            .launch(library_handle.clone())
-            .forward(sender.input_sender(), |msg: ContentPaneOutput| {
-                AppMsg::ContentPaneOutput(msg)
-            });
-        widgets.content_pane_slot.append(content.widget());
-
-        // -- Setup playback engine --
-        let (playback_tx, playback_rx) = mpsc::channel();
-        let mut playback = Playback::new(playback_tx);
-
-        let model = AppModel {
-            library_handle,
-            library_rx: Some(lib_event_rx),
-            queue: QueueState::new(),
-            playback: None,
-            playback_rx: None,
-            volume: 0.7,
-            muted: false,
-            playback_bar: pb,
-            nav_pane: nav,
-            content_pane: content,
-            current_track_path: None,
-        };
-
-        playback.set_volume(model.volume);
-        let model = AppModel {
-            playback: Some(playback),
-            playback_rx: Some(playback_rx),
-            ..model
-        };
-
-        // -- Periodic tick --
-        let sender_clone = sender.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-            sender_clone.input(AppMsg::Tick);
-            glib::ControlFlow::Continue
-        });
-
-        // -- Directory scan (deferred 300ms so window renders first) --
-        let lib_h = model.library_handle.clone();
-        let scan_tx = scan_event_tx;
-        let scan_state = std::cell::RefCell::new(Some((lib_h, scan_tx)));
-        glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
-            if let Some((handle, tx)) = scan_state.borrow_mut().take() {
-                scan::start_scan(handle, tx);
-            }
-            glib::ControlFlow::Break
-        });
-
-        ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
-        match msg {
-            AppMsg::Tick => {
-                // -- Drain playback events (collect first to avoid borrow conflicts) --
-                let playback_events: Vec<PlaybackEvent> = self
-                    .playback_rx
-                    .as_ref()
-                    .map(|rx| {
-                        let mut evts = Vec::new();
-                        while let Ok(event) = rx.try_recv() {
-                            evts.push(event);
-                        }
-                        evts
-                    })
-                    .unwrap_or_default();
+    container(header)
+        .padding([20, 22])
+        .style(header_panel_style)
+        .width(Length::Fill)
+        .into()
+}
 
-                for event in playback_events {
-                    match &event {
-                        PlaybackEvent::EndOfStream => self.advance_track(),
-                        PlaybackEvent::Error(err) => {
-                            eprintln!("Playback error: {}", err);
-                            self.advance_track();
-                        }
-                        PlaybackEvent::Position { .. }
-                        | PlaybackEvent::Tags { .. }
-                        | PlaybackEvent::StateChanged(_) => {
-                            let _ = self
-                                .playback_bar
-                                .sender()
-                                .send(PlaybackBarMsg::PlaybackEvent(event.clone()));
-                        }
-                    }
-                }
+fn view_nav<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
+    let static_pages = [
+        (Page::RecentlyAdded, "Recently added"),
+        (Page::Albums, "Albums"),
+        (Page::Artists, "Artists"),
+        (Page::Songs, "Songs"),
+        (Page::Queue, "Queue"),
+    ];
 
-                // -- Drain library events --
-                if let Some(ref rx) = self.library_rx {
-                    while let Ok(event) = rx.try_recv() {
-                        match event {
-                            LibraryEvent::SongsLoaded { .. } | LibraryEvent::SongsAdded { .. } => {
-                                let _ = self.content_pane.sender().send(ContentPaneMsg::SongsAdded);
-                            }
-                            LibraryEvent::PlaylistsChanged => {
-                                let playlists = self.library_handle.get_playlists();
-                                let _ = self
-                                    .nav_pane
-                                    .sender()
-                                    .send(NavPaneMsg::SetPlaylists(playlists.clone()));
-                                let _ = self
-                                    .content_pane
-                                    .sender()
-                                    .send(ContentPaneMsg::SetPlaylists(playlists));
-                            }
-                            LibraryEvent::ScanStarted
-                            | LibraryEvent::ScanComplete { .. }
-                            | LibraryEvent::Error(_) => {}
-                        }
-                    }
-                }
-            }
+    let mut nav = column![].spacing(8).width(240);
 
-            // -- PlaybackBar output --
-            AppMsg::PlaybackBarOutput(msg) => match msg {
-                PlaybackBarOutput::PlayPause => {
-                    if let Some(ref mut pb) = self.playback {
-                        if self.queue.current.is_none() && !self.queue.tracks.is_empty() {
-                            let idx = self.queue.tracks.len() - 1;
-                            self.queue.current = Some(idx);
-                            pb.play_file(&self.queue.tracks[idx]);
-                            self.update_current_track();
-                        } else {
-                            pb.toggle_pause();
-                        }
-                    }
-                }
-                PlaybackBarOutput::Previous => {
-                    if let Some(current) = self.queue.current
-                        && current > 0
-                    {
-                        let prev = current - 1;
-                        self.queue.current = Some(prev);
-                        self.play_track_at(prev);
-                    }
-                }
-                PlaybackBarOutput::Next => {
-                    self.advance_track();
-                }
-                PlaybackBarOutput::Seek(seconds) => {
-                    if let Some(ref mut pb) = self.playback {
-                        pb.seek(seconds);
-                    }
-                }
-                PlaybackBarOutput::VolumeChanged(vol) => {
-                    self.volume = vol;
-                    if let Some(ref mut pb) = self.playback {
-                        pb.set_volume(vol);
-                    }
-                    if self.muted {
-                        self.muted = false;
-                        if let Some(ref mut pb) = self.playback {
-                            pb.set_mute(false);
-                        }
-                    }
-                }
-                PlaybackBarOutput::MuteToggled => {
-                    self.muted = !self.muted;
-                    if let Some(ref mut pb) = self.playback {
-                        pb.set_mute(self.muted);
-                    }
-                }
-                PlaybackBarOutput::ShuffleToggled => {
-                    self.queue.toggle_shuffle();
-                    let _ = self
-                        .playback_bar
-                        .sender()
-                        .send(PlaybackBarMsg::SetShuffle(self.queue.shuffle));
-                }
-                PlaybackBarOutput::RepeatToggled => {
-                    self.queue.cycle_repeat();
-                    let _ = self
-                        .playback_bar
-                        .sender()
-                        .send(PlaybackBarMsg::SetRepeat(self.queue.repeat));
-                }
-            },
+    for (page, label) in static_pages {
+        nav = nav.push(page_button(state, page, label, palette));
+    }
 
-            // -- NavPane output --
-            AppMsg::NavPaneOutput(msg) => match msg {
-                NavPaneOutput::PageSelected(page) => {
-                    let _ = self
-                        .content_pane
-                        .sender()
-                        .send(ContentPaneMsg::SetPage(page));
-                }
-                NavPaneOutput::CreatePlaylist(_name) => {
-                    self.show_create_playlist_dialog();
-                }
-                NavPaneOutput::DeletePlaylist(id) => {
-                    self.library_handle.delete_playlist(id);
-                }
-                NavPaneOutput::RenamePlaylist(id, _name) => {
-                    self.show_rename_playlist_dialog(id);
-                }
-            },
+    nav = nav.push(Space::new().height(28));
+    nav = nav.push(text("PLAYLISTS").size(13).color(COLOR_DIM));
 
-            // -- ContentPane output --
-            AppMsg::ContentPaneOutput(msg) => match msg {
-                ContentPaneOutput::PlayFromLibrary(path) => {
-                    let idx = self.queue.push(path.clone());
-                    if self.queue.current.is_none() {
-                        self.queue.current = Some(idx);
-                        self.play_track_at(idx);
-                    } else {
-                        if let Some(ref mut pb) = self.playback {
-                            pb.stop();
-                            self.play_track_at(idx);
-                        }
-                    }
+    for playlist in &state.playlists {
+        let is_active = matches!(state.page, Page::Playlist(id) if id == playlist.id);
+
+        let base_row = mouse_area(
+            button(text(&playlist.name).size(16))
+                .width(Length::Fill)
+                .padding([13, 14])
+                .style({
+                    let palette = *palette;
+                    move |theme, status| nav_button_style(theme, status, is_active, &palette)
+                })
+                .on_press(Message::Intent(AppIntent::SelectPage(Page::Playlist(playlist.id)))),
+        )
+        .on_right_press(Message::OpenPlaylistMenu(playlist.id));
+
+        nav = nav.push(base_row);
+    }
+
+    nav = nav.push(Space::new().height(16));
+    nav = nav.push(
+        button("Settings")
+            .width(Length::Fill)
+            .padding([13, 14])
+            .style({
+                let palette = *palette;
+                move |theme, status| {
+                    nav_button_style(theme, status, state.page == Page::Settings, &palette)
                 }
-                ContentPaneOutput::QueueFromLibrary(path) => {
-                    self.queue.push(path);
-                }
-                ContentPaneOutput::AddToPlaylist(playlist_id, path) => {
-                    self.library_handle.add_to_playlist(playlist_id, path);
-                }
-                ContentPaneOutput::AddToNewPlaylist(_name, path) => {
-                    self.show_new_playlist_dialog(path);
-                }
-                ContentPaneOutput::SaveQueueAsPlaylist(_name) => {
-                    self.show_save_queue_dialog();
-                }
-                ContentPaneOutput::NavSongsWithSearch(_search) => {
-                    // Navigate to songs page and set search
-                    let _ = self
-                        .content_pane
-                        .sender()
-                        .send(ContentPaneMsg::SetPage(Page::Songs));
-                    // TODO: wire search text to ContentPane
-                }
-            },
+            })
+            .on_press(Message::Intent(AppIntent::SelectPage(Page::Settings))),
+    );
+
+    nav = nav.push(Space::new().height(Length::Fill));
+    nav = nav.push(
+        button("Create playlist")
+            .width(Length::Fill)
+            .padding([13, 14])
+            .style(ghost_button_style)
+            .on_press(Message::Intent(AppIntent::OpenCreatePlaylist)),
+    );
+
+    container(scrollable(nav))
+        .width(260)
+        .height(Length::Fill)
+        .padding(16)
+        .style(nav_panel_style)
+        .into()
+}
+
+fn page_button<'a>(
+    state: &'a AppState,
+    page: Page,
+    label: &'a str,
+    palette: &'a UiPalette,
+) -> Element<'a, Message> {
+    let selected = state.page == page;
+
+    button(text(label).size(16))
+        .width(Length::Fill)
+        .padding([13, 14])
+        .style({
+            let palette = *palette;
+            move |theme, status| nav_button_style(theme, status, selected, &palette)
+        })
+        .on_press(Message::Intent(AppIntent::SelectPage(page)))
+        .into()
+}
+
+fn view_content<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
+    let content: Element<'a, Message> = match &state.page {
+        Page::RecentlyAdded => {
+            view_song_list(
+                "Recently added",
+                "Search songs",
+                &state.songs_search,
+                &state.songs,
+                palette,
+            )
         }
+        Page::Songs => {
+            view_song_list("Songs", "Search songs", &state.songs_search, &state.songs, palette)
+        }
+        Page::Playlist(id) => {
+            let title = state
+                .playlists
+                .iter()
+                .find(|playlist| playlist.id == *id)
+                .map(|playlist| playlist.name.as_str())
+                .unwrap_or("Playlist");
+            view_song_list(title, "Filter playlist", &state.songs_search, &state.songs, palette)
+        }
+        Page::Albums => view_string_list(
+            "Albums",
+            "Search albums",
+            &state.albums_search,
+            &state.albums,
+            palette,
+            |value| Message::Intent(AppIntent::UpdateAlbumsSearch(value)),
+            |value| Message::Intent(AppIntent::ActivateAlbum(value)),
+        ),
+        Page::Artists => view_string_list(
+            "Artists",
+            "Search artists",
+            &state.artists_search,
+            &state.artists,
+            palette,
+            |value| Message::Intent(AppIntent::UpdateArtistsSearch(value)),
+            |value| Message::Intent(AppIntent::ActivateArtist(value)),
+        ),
+        Page::Queue => view_queue(state, palette),
+        Page::Settings => view_settings(state),
+    };
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding([18, 20])
+        .style(content_panel_style)
+        .into()
+}
+
+fn view_song_list<'a>(
+    title: &'a str,
+    placeholder: &'a str,
+    search: &'a str,
+    songs: &'a [SongView],
+    palette: &'a UiPalette,
+) -> Element<'a, Message> {
+    let mut list = column![
+        row![
+            text(title).size(22),
+            Space::new().width(Length::Fill),
+            text_input(placeholder, search)
+                .on_input(|value| Message::Intent(AppIntent::UpdateSongsSearch(value)))
+                .padding([10, 14])
+                .width(360)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| search_input_style(theme, status, &palette)
+                })
+        ]
+        .align_y(Alignment::Center)
+    ]
+    .spacing(18)
+    .width(Length::Fill);
+
+    if songs.is_empty() {
+        list = list.push(
+            container(text("No tracks yet").size(15).color(COLOR_DIM))
+                .padding(24)
+                .style(song_list_panel_style),
+        );
+    } else {
+        let mut rows = column![].spacing(8);
+        for song in songs {
+            rows = rows.push(song_row(song, palette));
+        }
+
+        list = list.push(
+            container(scrollable(rows))
+                .padding(10)
+                .height(Length::Fill)
+                .style(song_list_panel_style),
+        );
+    }
+
+    list.into()
+}
+
+fn song_row<'a>(song: &'a SongView, palette: &'a UiPalette) -> Element<'a, Message> {
+    let title = if song.is_current {
+        format!("▶ {}", song.title)
+    } else {
+        song.title.clone()
+    };
+
+    mouse_area(
+        container(
+            row![
+                button(
+                    column![
+                        text(title).size(17),
+                        row![
+                            text(&song.artist).size(13).color(COLOR_DIM),
+                            text("•").size(13).color(COLOR_DIM),
+                            text(&song.album).size(13).color(COLOR_DIM),
+                        ]
+                        .spacing(8)
+                    ]
+                    .spacing(6)
+                )
+                .style(plain_button_style)
+                .width(Length::Fill)
+                .padding(0)
+                .on_press(Message::Intent(AppIntent::PlaySong(song.path.clone()))),
+                text(&song.duration).size(14).color(COLOR_DIM).width(56),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .padding([14, 16])
+        .width(Length::Fill)
+        .style({
+            let palette = *palette;
+            move |theme| song_row_style(theme, song.is_current, &palette)
+        }),
+    )
+    .on_right_press(Message::OpenSongMenu {
+        path: song.path.clone(),
+        queue_index: song.queue_index,
+    })
+    .into()
+}
+
+fn view_string_list<'a, FSearch, FActivate>(
+    title: &'a str,
+    placeholder: &'a str,
+    search: &'a str,
+    values: &'a [String],
+    palette: &'a UiPalette,
+    on_search: FSearch,
+    on_activate: FActivate,
+) -> Element<'a, Message>
+where
+    FSearch: Fn(String) -> Message + 'static + Copy,
+    FActivate: Fn(String) -> Message + 'static + Copy,
+{
+    let mut rows = column![
+        row![
+            text(title).size(22),
+            Space::new().width(Length::Fill),
+            text_input(placeholder, search)
+                .on_input(on_search)
+                .padding([10, 14])
+                .width(360)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| search_input_style(theme, status, &palette)
+                })
+        ]
+        .align_y(Alignment::Center)
+    ]
+    .spacing(18);
+
+    let mut list = column![].spacing(8);
+    for value in values {
+        list = list.push(
+            button(text(value).size(16))
+                .width(Length::Fill)
+                .padding([14, 16])
+                .style({
+                    let palette = *palette;
+                    move |theme, status| list_button_style(theme, status, &palette)
+                })
+                .on_press(on_activate(value.clone())),
+        );
+    }
+
+    rows = rows.push(
+        container(scrollable(list))
+            .padding(10)
+            .height(Length::Fill)
+            .style(song_list_panel_style),
+    );
+
+    rows.into()
+}
+
+fn view_queue<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
+    let mut list = column![row![
+        text("Queue").size(22),
+        Space::new().width(Length::Fill),
+        button("Save queue as playlist")
+            .padding([10, 14])
+            .style(ghost_button_style)
+            .on_press(Message::Intent(AppIntent::OpenSaveQueueAsPlaylist))
+    ]
+    .align_y(Alignment::Center)]
+    .spacing(18);
+
+    if state.queue.is_empty() {
+        list = list.push(
+            container(text("Queue is empty").size(15).color(COLOR_DIM))
+                .padding(24)
+                .style(song_list_panel_style),
+        );
+    } else {
+        let mut rows = column![].spacing(8);
+        for song in &state.queue {
+            rows = rows.push(song_row(song, palette));
+        }
+
+        list = list.push(
+            container(scrollable(rows))
+                .padding(10)
+                .height(Length::Fill)
+                .style(song_list_panel_style),
+        );
+    }
+
+    list.into()
+}
+
+fn view_settings<'a>(state: &'a AppState) -> Element<'a, Message> {
+    container(
+        column![
+            text("Settings").size(22),
+            text("This migration keeps settings minimal.").size(15),
+            text(if state.scan_started {
+                "Startup scan has started."
+            } else {
+                "Startup scan is waiting for the first render tick."
+            })
+            .size(14)
+            .color(COLOR_DIM),
+        ]
+        .spacing(12),
+    )
+    .padding(18)
+    .style(song_list_panel_style)
+    .into()
+}
+
+fn view_modal_overlay<'a>(
+    _state: &'a AppState,
+    modal: &'a ActiveModal,
+    palette: &'a UiPalette,
+) -> Element<'a, Message> {
+    let title = match modal {
+        ActiveModal::CreatePlaylist { .. } => "Create playlist",
+        ActiveModal::RenamePlaylist { .. } => "Rename playlist",
+        ActiveModal::CreatePlaylistAndAddSong { .. } => "Create playlist and add song",
+        ActiveModal::SaveQueueAsPlaylist { .. } => "Save queue as playlist",
+    };
+
+    let body: Element<'a, Message> = match modal {
+        ActiveModal::CreatePlaylist { name }
+        | ActiveModal::RenamePlaylist { name, .. }
+        | ActiveModal::CreatePlaylistAndAddSong { name, .. }
+        | ActiveModal::SaveQueueAsPlaylist { name } => column![
+            text_input("Playlist name", name)
+                .on_input(Message::ModalTextChanged)
+                .on_submit(Message::ModalConfirm)
+                .padding([10, 14])
+                .width(Length::Fill)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| search_input_style(theme, status, &palette)
+                })
+        ]
+        .spacing(12)
+        .into(),
+    };
+
+    container(
+        container(
+            column![
+                text(title).size(22),
+                body,
+                row![
+                    Space::new().width(Length::Fill),
+                    button("Cancel")
+                        .padding([10, 14])
+                        .style(ghost_button_style)
+                        .on_press(Message::ModalCancel),
+                    button("Confirm")
+                        .padding([10, 14])
+                        .style(control_button_style)
+                        .on_press(Message::ModalConfirm)
+                ]
+                .spacing(10)
+            ]
+            .spacing(16),
+        )
+        .padding(22)
+        .width(420)
+        .style(modal_panel_style),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .style(modal_backdrop_style)
+    .into()
+}
+
+fn icon_button<'a>(icon: &'static [u8], message: Message) -> iced::widget::Button<'a, Message> {
+    button(icon_svg(icon))
+        .padding(10)
+        .width(44)
+        .height(44)
+        .style(control_button_style)
+        .on_press(message)
+}
+
+fn toggle_icon_button<'a>(
+    icon: &'static [u8],
+    active: bool,
+    message: Message,
+    palette: &'a UiPalette,
+) -> iced::widget::Button<'a, Message> {
+    button(icon_svg(icon))
+        .padding(10)
+        .width(44)
+        .height(44)
+        .style({
+            let palette = *palette;
+            move |theme, status| toggle_icon_button_style(theme, status, active, &palette)
+        })
+        .on_press(message)
+}
+
+fn icon_svg<'a>(icon: &'static [u8]) -> iced::widget::Svg<'a, Theme> {
+    svg(iced::widget::svg::Handle::from_memory(icon))
+        .width(20)
+        .height(20)
+        .style(|_theme, _status| iced::widget::svg::Style {
+            color: Some(COLOR_TEXT),
+        })
+}
+
+fn menu_item_button<'a>(label: &'a str, message: Message) -> iced::widget::Button<'a, Message> {
+    button(text(label).size(14))
+        .width(Length::Fill)
+        .padding([10, 12])
+        .style(menu_item_button_style)
+        .on_press(message)
+}
+
+fn menu_item_button_with_state(
+    label: String,
+    message: Option<Message>,
+) -> Element<'static, Message> {
+    let button = button(text(label).size(14))
+        .width(Length::Fill)
+        .padding([10, 12])
+        .style(menu_item_button_style);
+
+    match message {
+        Some(message) => button.on_press(message).into(),
+        None => button.into(),
     }
 }
 
-impl AppModel {
-    fn play_track_at(&mut self, idx: usize) {
-        if let Some(ref mut pb) = self.playback
-            && let Some(path) = self.queue.tracks.get(idx)
-        {
-            pb.play_file(path);
-            self.update_current_track();
+fn menu_item_button_variant<'a>(
+    label: &'a str,
+    message: Message,
+    alternate: bool,
+) -> iced::widget::Button<'a, Message> {
+    button(text(label).size(14))
+        .width(Length::Fill)
+        .padding([10, 12])
+        .style(move |theme, status| menu_item_button_variant_style(theme, status, alternate))
+        .on_press(message)
+}
+
+fn playlist_context_menu<'a>(playlist_id: i64) -> iced::widget::Column<'a, Message> {
+    column![
+        menu_item_button(
+            "Rename playlist",
+            Message::Intent(AppIntent::OpenRenamePlaylist { id: playlist_id }),
+        ),
+        menu_item_button(
+            "Delete playlist",
+            Message::Intent(AppIntent::DeletePlaylist(playlist_id)),
+        ),
+    ]
+    .spacing(2)
+}
+
+fn view_context_menu_overlay<'a>(context_menu: &'a ContextMenu) -> Element<'a, Message> {
+    let ((menu_width, menu_height), position, menu_content): (
+        (f32, f32),
+        Point,
+        Element<'a, Message>,
+    ) =
+        match context_menu {
+        ContextMenu::Song {
+            path,
+            position,
+            current_playlist_id,
+            queue_index,
+            playlists,
+        } => {
+            let (menu_width, menu_height) =
+                song_context_menu_size(
+                    playlists.len(),
+                    current_playlist_id.is_some(),
+                    queue_index.is_some(),
+                );
+
+            (
+                (menu_width, menu_height),
+                *position,
+                song_context_menu_for_path(
+                    path.clone(),
+                    *current_playlist_id,
+                    *queue_index,
+                    playlists,
+                    menu_height,
+                ),
+            )
+        }
+        ContextMenu::Playlist { id, position } => (
+            (210.0, 110.0),
+            *position,
+            playlist_context_menu(*id).into(),
+        ),
+    };
+
+    let (x, y) = clamp_menu_position(position, menu_width, menu_height);
+    let menu = container(menu_content)
+        .padding(8)
+        .width(menu_width)
+        .style(menu_panel_style);
+
+    mouse_area(
+        container(
+            column![
+                Space::new().height(y),
+                row![
+                    Space::new().width(x),
+                    menu,
+                    Space::new().width(Length::Fill),
+                ],
+                Space::new().height(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .on_press(Message::CloseContextMenu)
+    .into()
+}
+
+fn song_context_menu_for_path<'a>(
+    path: PathBuf,
+    current_playlist_id: Option<i64>,
+    queue_index: Option<usize>,
+    playlists: &'a [SongPlaylistMenuItem],
+    menu_height: f32,
+) -> Element<'a, Message> {
+    let mut menu = column![
+        menu_item_button("Play now", Message::Intent(AppIntent::PlaySong(path.clone()))),
+        menu_item_button(
+            "Queue track",
+            Message::Intent(AppIntent::QueueSong(path.clone())),
+        ),
+    ]
+    .spacing(2);
+
+    if let Some(playlist_id) = current_playlist_id {
+        menu = menu.push(menu_separator());
+        menu = menu.push(menu_item_button(
+            "Remove from this playlist",
+            Message::Intent(AppIntent::RemoveSongFromPlaylist {
+                playlist_id,
+                path: path.clone(),
+            }),
+        ));
+    }
+
+    if let Some(queue_index) = queue_index {
+        menu = menu.push(menu_separator());
+        menu = menu.push(menu_item_button(
+            "Remove from queue",
+            Message::Intent(AppIntent::RemoveFromQueue(queue_index)),
+        ));
+    }
+
+    menu = menu.push(menu_separator());
+    menu = menu.push(
+        text("Add to playlist")
+            .size(13)
+            .color(COLOR_DIM)
+            .width(Length::Fill),
+    );
+
+    if playlists.is_empty() {
+        menu = menu.push(
+            container(text("No playlists yet").size(14).color(COLOR_DIM))
+                .padding([10, 12])
+                .width(Length::Fill),
+        );
+    } else {
+        for playlist in playlists {
+            let label = if playlist.contains_song {
+                format!("✓ {} (already added)", playlist.name)
+            } else {
+                playlist.name.clone()
+            };
+            let message = (!playlist.contains_song).then_some(Message::Intent(
+                AppIntent::AddSongToPlaylist {
+                    playlist_id: playlist.id,
+                    path: path.clone(),
+                },
+            ));
+            menu = menu.push(menu_item_button_with_state(label, message));
         }
     }
 
-    fn advance_track(&mut self) {
-        if let Some(next) = self.queue.next_track() {
-            self.queue.current = Some(next);
-            self.play_track_at(next);
+    menu = menu.push(menu_item_button_variant(
+        "Create new",
+        Message::Intent(AppIntent::OpenCreatePlaylistAndAddSong { path }),
+        true,
+    ));
+
+    container(scrollable(menu).height(menu_height))
+        .into()
+}
+
+#[derive(Clone, Debug)]
+struct SongPlaylistMenuItem {
+    id: i64,
+    name: String,
+    contains_song: bool,
+}
+
+const COLOR_BG: Color = Color::from_rgb(0.10, 0.10, 0.11);
+const COLOR_PANEL_ALT: Color = Color::from_rgb(0.08, 0.08, 0.09);
+const COLOR_ROW_ACTIVE: Color = Color::from_rgb(0.17, 0.17, 0.18);
+const COLOR_BORDER: Color = Color::from_rgb(0.23, 0.23, 0.24);
+const COLOR_TEXT: Color = Color::from_rgb(0.92, 0.92, 0.93);
+const COLOR_DIM: Color = Color::from_rgb(0.58, 0.58, 0.60);
+const COLOR_BACKDROP: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.55);
+const COLOR_SURFACE: Color = Color::from_rgb(0.12, 0.12, 0.13);
+const COLOR_SURFACE_SOFT: Color = Color::from_rgb(0.15, 0.15, 0.16);
+const COLOR_BORDER_SUBTLE: Color = Color::from_rgb(0.18, 0.18, 0.20);
+const WINDOW_WIDTH: f32 = 1240.0;
+const WINDOW_HEIGHT: f32 = 820.0;
+const CONTEXT_MENU_WIDTH: f32 = 220.0;
+const RADIUS_PANEL: f32 = 14.0;
+const RADIUS_CONTROL: f32 = 10.0;
+const RADIUS_ROW: f32 = 12.0;
+const RADIUS_INPUT: f32 = 12.0;
+
+fn app_shell_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_BG, 0.0)
+}
+
+fn header_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_SURFACE, RADIUS_PANEL)
+}
+
+fn nav_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_PANEL_ALT, RADIUS_PANEL)
+}
+
+fn content_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_SURFACE, RADIUS_PANEL)
+}
+
+fn song_list_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_PANEL_ALT, RADIUS_PANEL - 2.0)
+}
+
+fn menu_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_SURFACE_SOFT, RADIUS_ROW)
+}
+
+fn modal_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    panel_style(COLOR_SURFACE, RADIUS_PANEL)
+}
+
+fn modal_backdrop_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(Background::Color(COLOR_BACKDROP)),
+        ..Default::default()
+    }
+}
+
+fn song_row_style(
+    _theme: &Theme,
+    is_current: bool,
+    palette: &UiPalette,
+) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(Background::Color(if is_current {
+            Color::from_rgb(0.18, 0.19, 0.22)
         } else {
-            if let Some(ref mut pb) = self.playback {
-                pb.stop();
-            }
-            self.queue.current = None;
-            self.current_track_path = None;
-            let _ = self
-                .content_pane
-                .sender()
-                .send(ContentPaneMsg::CurrentTrackPath(None));
-        }
+            Color::from_rgb(0.10, 0.10, 0.11)
+        })),
+        text_color: Some(COLOR_TEXT),
+        border: Border {
+            radius: RADIUS_ROW.into(),
+            width: 1.0,
+            color: if is_current {
+                palette.accent_border
+            } else {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+            },
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn nav_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+    selected: bool,
+    palette: &UiPalette,
+) -> iced::widget::button::Style {
+    let base_bg = if selected {
+        COLOR_ROW_ACTIVE
+    } else {
+        Color::TRANSPARENT
+    };
+
+    let hover_bg = if selected {
+        COLOR_ROW_ACTIVE
+    } else {
+        palette.accent_soft
+    };
+
+    let background = match status {
+        iced::widget::button::Status::Hovered => hover_bg,
+        iced::widget::button::Status::Pressed => COLOR_BORDER,
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => base_bg,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border {
+            radius: RADIUS_ROW.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn control_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let background = match status {
+        iced::widget::button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.22),
+        iced::widget::button::Status::Pressed => Color::from_rgb(0.24, 0.24, 0.26),
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => Color::from_rgb(0.16, 0.16, 0.18),
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border {
+            radius: RADIUS_CONTROL.into(),
+            width: 1.0,
+            color: COLOR_BORDER_SUBTLE,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn toggle_icon_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+    active: bool,
+    palette: &UiPalette,
+) -> iced::widget::button::Style {
+    let background = match (active, status) {
+        (true, iced::widget::button::Status::Hovered) => palette.accent_toggle_bg_hover,
+        (true, iced::widget::button::Status::Pressed) => palette.accent_toggle_bg_pressed,
+        (true, iced::widget::button::Status::Disabled)
+        | (true, iced::widget::button::Status::Active) => palette.accent_toggle_bg,
+        (false, iced::widget::button::Status::Hovered) => Color::from_rgb(0.20, 0.20, 0.22),
+        (false, iced::widget::button::Status::Pressed) => Color::from_rgb(0.24, 0.24, 0.26),
+        (false, iced::widget::button::Status::Disabled)
+        | (false, iced::widget::button::Status::Active) => Color::from_rgb(0.16, 0.16, 0.18),
+    };
+
+    let border_color = if active { palette.accent } else { COLOR_BORDER };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border {
+            radius: RADIUS_CONTROL.into(),
+            width: 1.0,
+            color: border_color,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn ghost_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let background = match status {
+        iced::widget::button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.19),
+        iced::widget::button::Status::Pressed => Color::from_rgb(0.22, 0.22, 0.23),
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border {
+            radius: RADIUS_CONTROL.into(),
+            width: 1.0,
+            color: COLOR_BORDER_SUBTLE,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn plain_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let text_color = match status {
+        iced::widget::button::Status::Disabled => COLOR_DIM,
+        _ => COLOR_TEXT,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color,
+        border: Border::default(),
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn list_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+    palette: &UiPalette,
+) -> iced::widget::button::Style {
+    let background = match status {
+        iced::widget::button::Status::Hovered => palette.accent_soft,
+        iced::widget::button::Status::Pressed => COLOR_ROW_ACTIVE,
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border::default(),
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn menu_item_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let background = match status {
+        iced::widget::button::Status::Hovered => COLOR_ROW_ACTIVE,
+        iced::widget::button::Status::Pressed => Color::from_rgb(0.20, 0.20, 0.21),
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: COLOR_TEXT,
+        border: Border {
+            radius: RADIUS_ROW.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn menu_item_button_variant_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+    alternate: bool,
+) -> iced::widget::button::Style {
+    if !alternate {
+        return menu_item_button_style(_theme, status);
     }
 
-    fn update_current_track(&mut self) {
-        let path = self
-            .queue
-            .current
-            .and_then(|i| self.queue.tracks.get(i).cloned());
-        self.current_track_path = path.clone();
-        let _ = self
-            .content_pane
-            .sender()
-            .send(ContentPaneMsg::CurrentTrackPath(path));
+    let background = match status {
+        iced::widget::button::Status::Hovered => COLOR_ROW_ACTIVE,
+        iced::widget::button::Status::Pressed => Color::from_rgb(0.20, 0.20, 0.21),
+        iced::widget::button::Status::Disabled
+        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+    };
+
+    iced::widget::button::Style {
+        background: Some(Background::Color(background)),
+        text_color: Color::from_rgb(0.68, 0.68, 0.70),
+        border: Border {
+            radius: RADIUS_ROW.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
     }
+}
 
-    /// Show a dialog asking for a playlist name, then create it.
-    fn show_create_playlist_dialog(&self) {
-        let dialog = gtk4::Dialog::builder()
-            .title("Create Playlist")
-            .modal(true)
-            .build();
+fn search_input_style(
+    _theme: &Theme,
+    status: iced::widget::text_input::Status,
+    palette: &UiPalette,
+) -> iced::widget::text_input::Style {
+    let border_color = match status {
+        iced::widget::text_input::Status::Focused { .. } => palette.accent,
+        iced::widget::text_input::Status::Hovered => Color::from_rgb(0.35, 0.35, 0.37),
+        iced::widget::text_input::Status::Active
+        | iced::widget::text_input::Status::Disabled => COLOR_BORDER,
+    };
 
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Playlist name"));
-        dialog.content_area().append(&entry);
-
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Create", gtk4::ResponseType::Accept);
-
-        let lib = self.library_handle.clone();
-        dialog.connect_response(move |d, resp| {
-            if resp == gtk4::ResponseType::Accept {
-                let name = entry.text().to_string();
-                if !name.is_empty() {
-                    let _ = lib.create_playlist(&name);
-                }
-            }
-            d.close();
-        });
-
-        dialog.present();
+    iced::widget::text_input::Style {
+        background: Background::Color(Color::from_rgb(0.10, 0.10, 0.11)),
+        border: Border {
+            radius: RADIUS_INPUT.into(),
+            width: 1.0,
+            color: border_color,
+        },
+        icon: COLOR_DIM,
+        placeholder: COLOR_DIM,
+        value: COLOR_TEXT,
+        selection: palette.focused_selection,
     }
+}
 
-    /// Show a dialog asking for a new name for an existing playlist.
-    fn show_rename_playlist_dialog(&self, playlist_id: i64) {
-        let dialog = gtk4::Dialog::builder()
-            .title("Rename Playlist")
-            .modal(true)
-            .build();
+fn slider_style(
+    _theme: &Theme,
+    status: iced::widget::slider::Status,
+    palette: &UiPalette,
+) -> iced::widget::slider::Style {
+    let handle_background = match status {
+        iced::widget::slider::Status::Active => palette.accent,
+        iced::widget::slider::Status::Hovered => palette.accent_toggle_bg_hover,
+        iced::widget::slider::Status::Dragged => palette.accent_toggle_bg_pressed,
+    };
 
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("New name"));
-        dialog.content_area().append(&entry);
+    let handle_border = match status {
+        iced::widget::slider::Status::Active => palette.accent,
+        iced::widget::slider::Status::Hovered => palette.accent,
+        iced::widget::slider::Status::Dragged => palette.accent,
+    };
 
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Rename", gtk4::ResponseType::Accept);
-
-        let lib = self.library_handle.clone();
-        dialog.connect_response(move |d, resp| {
-            if resp == gtk4::ResponseType::Accept {
-                let name = entry.text().to_string();
-                if !name.is_empty() {
-                    lib.rename_playlist(playlist_id, &name);
-                }
-            }
-            d.close();
-        });
-
-        dialog.present();
+    iced::widget::slider::Style {
+        rail: iced::widget::slider::Rail {
+            backgrounds: (
+                Background::Color(palette.accent),
+                Background::Color(Color::from_rgb(0.36, 0.36, 0.39)),
+            ),
+            width: 4.0,
+            border: Border {
+                radius: 999.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+        },
+        handle: iced::widget::slider::Handle {
+            shape: iced::widget::slider::HandleShape::Circle { radius: 7.0 },
+            background: Background::Color(handle_background),
+            border_width: 1.0,
+            border_color: handle_border,
+        },
     }
+}
 
-    /// Show a dialog asking for a playlist name, then create it and add
-    /// the given song.
-    fn show_new_playlist_dialog(&self, song_path: PathBuf) {
-        let dialog = gtk4::Dialog::builder()
-            .title("New Playlist")
-            .modal(true)
-            .build();
-
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Playlist name"));
-        dialog.content_area().append(&entry);
-
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Create", gtk4::ResponseType::Accept);
-
-        let lib = self.library_handle.clone();
-        dialog.connect_response(move |d, resp| {
-            if resp == gtk4::ResponseType::Accept {
-                let name = entry.text().to_string();
-                if !name.is_empty()
-                    && let Ok(id) = lib.create_playlist(&name)
-                {
-                    lib.add_to_playlist(id, song_path.clone());
-                }
-            }
-            d.close();
-        });
-
-        dialog.present();
+fn panel_style(background: Color, radius: f32) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(Background::Color(background)),
+        text_color: Some(COLOR_TEXT),
+        border: Border {
+            radius: radius.into(),
+            width: 1.0,
+            color: COLOR_BORDER_SUBTLE,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
     }
+}
 
-    /// Show a dialog asking for a playlist name, then save the current
-    /// queue as a new playlist.
-    fn show_save_queue_dialog(&self) {
-        let dialog = gtk4::Dialog::builder()
-            .title("Save Queue as Playlist")
-            .modal(true)
-            .build();
+fn format_time(seconds: f64) -> String {
+    let seconds = seconds.max(0.0).round() as u64;
+    let minutes = seconds / 60;
+    let remainder = seconds % 60;
+    format!("{minutes}:{remainder:02}")
+}
 
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Playlist name"));
-        dialog.content_area().append(&entry);
+#[derive(Debug, Clone)]
+enum ContextMenu {
+    Song {
+        path: PathBuf,
+        position: Point,
+        current_playlist_id: Option<i64>,
+        queue_index: Option<usize>,
+        playlists: Vec<SongPlaylistMenuItem>,
+    },
+    Playlist { id: i64, position: Point },
+}
 
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Save", gtk4::ResponseType::Accept);
+fn clamp_menu_position(position: Point, menu_width: f32, menu_height: f32) -> (f32, f32) {
+    let x = position.x.clamp(12.0, WINDOW_WIDTH - menu_width - 24.0);
+    let y = position.y.clamp(12.0, WINDOW_HEIGHT - menu_height - 24.0);
+    (x, y)
+}
 
-        let lib = self.library_handle.clone();
-        let tracks = self.queue.tracks.clone();
-        dialog.connect_response(move |d, resp| {
-            if resp == gtk4::ResponseType::Accept {
-                let name = entry.text().to_string();
-                if !name.is_empty()
-                    && let Ok(id) = lib.create_playlist(&name)
-                {
-                    for path in &tracks {
-                        lib.add_to_playlist(id, path.clone());
-                    }
-                }
-            }
-            d.close();
-        });
+fn song_context_menu_size(
+    playlist_count: usize,
+    has_playlist_remove_action: bool,
+    has_queue_remove_action: bool,
+) -> (f32, f32) {
+    let base_rows =
+        4 + usize::from(has_playlist_remove_action) + usize::from(has_queue_remove_action);
+    let estimated_height = 28.0 + (base_rows as f32 * 38.0) + (playlist_count as f32 * 38.0);
+    (CONTEXT_MENU_WIDTH, estimated_height.min(360.0))
+}
 
-        dialog.present();
-    }
+fn menu_separator<'a>() -> iced::widget::Rule<'a, Theme> {
+    iced::widget::rule::horizontal(1).style(|_theme| iced::widget::rule::Style {
+        color: COLOR_BORDER,
+        radius: 0.0.into(),
+        fill_mode: iced::widget::rule::FillMode::Full,
+        snap: true,
+    })
 }

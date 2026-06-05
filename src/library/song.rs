@@ -34,13 +34,6 @@ impl Song {
             && !self.duration_str.is_empty()
     }
 
-    pub fn label(&self) -> String {
-        if self.artist.is_empty() || self.artist == UNKNOWN_ARTIST {
-            self.title.clone()
-        } else {
-            format!("{} — {}", self.title, self.artist)
-        }
-    }
 }
 
 pub fn fallback_title_for_path(path: &PathBuf) -> String {
@@ -66,11 +59,4 @@ impl RepeatMode {
         }
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Repeat: Off",
-            Self::All => "Repeat: All",
-            Self::One => "Repeat: One",
-        }
-    }
 }

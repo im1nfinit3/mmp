@@ -2,24 +2,29 @@
 name = "mmp"
 version = "0.1.0"
 edition = "2024"
-description = "A GTK4 music player (Rust port)"
+description = "A native Rust music player built with Iced"
 
 [dependencies]
-# GTK4 + Relm4 (Elm-inspired GUI framework)
-gtk4 = { version = "0.11", package = "gtk4" }
-glib = "0.22"
-relm4 = { version = "0.11", features = ["macros"] }
-relm4-components = "0.11"
+iced = { version = "0.14.0", features = ["tokio", "svg"] }
 
 # Rust-native audio playback and metadata
 lofty = "0.24"
-rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4"] }
-symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4", "symphonia-alac"] }
 
 # SQLite for library and playlists
-rusqlite = { version = "0.35", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 # Utilities
 walkdir = "2"
 rand = "0.9"
 dirs = "6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSColor", "NSColorSpace", "objc2-core-foundation"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62.2", features = ["UI_ViewManagement"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.11", default-features = false, features = ["settings", "tokio"] }
+tokio = { version = "1.52.3", features = ["rt", "time"] }

@@ -1,55 +1,8 @@
-//! Filter predicates for the music library.
-//!
-//! Playlists are treated as filter predicates: `library.get_songs(|song| playlist.contains(song.id))`.
+//! Helpers for deriving aggregate library views.
 
 use std::collections::BTreeSet;
 
 use super::song::Song;
-
-/// Type alias for a song filter function used in library queries.
-pub type FilterFn = Box<dyn Fn(&Song) -> bool + Send + 'static>;
-
-/// Filter the library by search text, artist, album, and an optional predicate.
-pub fn filter_songs<'a>(
-    songs: &'a [Song],
-    search_lowered: &str,
-    selected_artist: &Option<String>,
-    selected_album: &Option<String>,
-    extra_predicate: Option<&FilterFn>,
-) -> Vec<&'a Song> {
-    songs
-        .iter()
-        .filter(|song| {
-            if !search_lowered.is_empty() {
-                let tl = song.title.to_lowercase();
-                let al = song.artist.to_lowercase();
-                let bl = song.album.to_lowercase();
-                if !tl.contains(search_lowered)
-                    && !al.contains(search_lowered)
-                    && !bl.contains(search_lowered)
-                {
-                    return false;
-                }
-            }
-            if let Some(a) = selected_artist
-                && song.artist != *a
-            {
-                return false;
-            }
-            if let Some(a) = selected_album
-                && song.album != *a
-            {
-                return false;
-            }
-            if let Some(pred) = extra_predicate
-                && !pred(song)
-            {
-                return false;
-            }
-            true
-        })
-        .collect()
-}
 
 /// Extract unique artists from a song slice, sorted.
 pub fn unique_artists(songs: &[Song]) -> Vec<String> {

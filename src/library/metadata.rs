@@ -91,10 +91,6 @@ pub fn apply_lofty_tags(metadata: &mut TrackMetadata, tagged_file: &TaggedFile) 
     }
 }
 
-pub fn read_duration(path: &Path) -> Option<String> {
-    read_duration_value(path).map(format_duration)
-}
-
 pub fn read_duration_value(path: &Path) -> Option<Duration> {
     let file = std::fs::File::open(path).ok()?;
     let decoder = Decoder::try_from(file).ok()?;

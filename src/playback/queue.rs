@@ -42,27 +42,6 @@ impl QueueState {
         idx
     }
 
-    /// Insert a track right after the current track.
-    /// Returns the index of the inserted track.
-    pub fn insert_after_current(&mut self, path: PathBuf) -> Option<usize> {
-        let current = self.current?;
-        let insert_idx = current + 1;
-        self.tracks.insert(insert_idx, path);
-
-        // Adjust all indices in unplayed_pool >= insert_idx
-        for idx in &mut self.unplayed_pool {
-            if *idx >= insert_idx {
-                *idx += 1;
-            }
-        }
-        // Shift current if needed (it won't be, since we insert after)
-        if self.shuffle {
-            self.unplayed_pool.push(insert_idx);
-        }
-
-        Some(insert_idx)
-    }
-
     /// Remove a track at the given index.
     pub fn remove(&mut self, index: usize) {
         if index >= self.tracks.len() {
@@ -93,23 +72,6 @@ impl QueueState {
                 *idx -= 1;
             }
         }
-    }
-
-    /// Remove the node at the given index (returns path if found).
-    pub fn remove_node(&mut self, node_index: usize) -> Option<PathBuf> {
-        if node_index >= self.tracks.len() {
-            return None;
-        }
-        let path = self.tracks[node_index].clone();
-        self.remove(node_index);
-        Some(path)
-    }
-
-    /// Clear the entire queue.
-    pub fn clear(&mut self) {
-        self.tracks.clear();
-        self.current = None;
-        self.unplayed_pool.clear();
     }
 
     /// Toggle shuffle mode on/off.
