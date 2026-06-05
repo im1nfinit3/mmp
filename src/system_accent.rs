@@ -1,5 +1,4 @@
 use iced::Color;
-use std::time::Duration;
 
 const FALLBACK_ACCENT: Color = Color::from_rgb(0.27, 0.52, 0.95);
 const BASE_ACTIVE_SURFACE: Color = Color::from_rgb(0.17, 0.17, 0.18);
@@ -74,7 +73,7 @@ fn startup_accent() -> Option<Color> {
         .ok()?;
 
     runtime.block_on(async {
-        tokio::time::timeout(Duration::from_millis(200), load_system_accent())
+        tokio::time::timeout(std::time::Duration::from_millis(200), load_system_accent())
             .await
             .ok()
             .flatten()
@@ -106,11 +105,6 @@ pub async fn load_system_accent() -> Option<Color> {
 }
 
 #[cfg(target_os = "macos")]
-pub async fn load_system_accent() -> Option<Color> {
-    platform_accent_sync()
-}
-
-#[cfg(target_os = "macos")]
 fn platform_accent_sync() -> Option<Color> {
     use objc2_app_kit::{NSColor, NSColorSpace};
 
@@ -125,11 +119,6 @@ fn platform_accent_sync() -> Option<Color> {
 }
 
 #[cfg(target_os = "windows")]
-pub async fn load_system_accent() -> Option<Color> {
-    platform_accent_sync()
-}
-
-#[cfg(target_os = "windows")]
 fn platform_accent_sync() -> Option<Color> {
     use windows::UI::ViewManagement::{UIColorType, UISettings};
 
@@ -141,11 +130,6 @@ fn platform_accent_sync() -> Option<Color> {
         f32::from(color.G) / 255.0,
         f32::from(color.B) / 255.0,
     ))
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub async fn load_system_accent() -> Option<Color> {
-    None
 }
 
 #[cfg(test)]
