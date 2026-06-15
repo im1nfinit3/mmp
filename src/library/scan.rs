@@ -10,7 +10,9 @@ use std::sync::mpsc;
 use crate::library::{LibraryEvent, LibraryHandle, db};
 use crate::library::{metadata, song::Song};
 
+/// Maximum number of file paths accumulated before sending to the metadata worker.
 const WALK_BATCH_SIZE: usize = 200;
+/// Maximum number of fully-parsed songs accumulated before sending to the library.
 const SONG_BATCH_SIZE: usize = 25;
 
 /// Start an async directory scan.

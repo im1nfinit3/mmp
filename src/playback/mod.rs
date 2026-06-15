@@ -1,7 +1,4 @@
 //! Rust-native audio playback engine for local music files.
-//!
-//! This keeps the existing UI-facing control surface while replacing the
-//! GStreamer runtime with `rodio` and Rust-native metadata extraction.
 
 mod queue;
 pub use queue::QueueState;

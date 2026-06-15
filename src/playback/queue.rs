@@ -1,6 +1,4 @@
 //! Queue state for linear + shuffle playback.
-//!
-//! Pure logic — no GStreamer dependency. Unit-tested.
 
 use std::path::PathBuf;
 

@@ -89,7 +89,6 @@ pub enum AppIntent {
     AddAllFilteredToPlaylist(i64),
     OpenCreatePlaylistAndAddAllFiltered,
     ConfirmCreatePlaylistAndAddAllFiltered(String),
-    /// Settings intents
     SetLibraryFolder(String),
     SetScanOnStartup(bool),
     SetDefaultView(String),
@@ -346,6 +345,9 @@ impl AppCore {
         effects
     }
 
+    /// Process a user intent and return side-effects (modals, notifications).
+    /// Some intents mark the view as dirty, causing `tick()` to recompute
+    /// derived state (filtered song list, queue view, etc.) on the next frame.
     pub fn handle_intent(&mut self, intent: AppIntent) -> Vec<AppEffect> {
         let affects_views = matches!(
             intent,
@@ -758,7 +760,6 @@ impl AppCore {
                     .collect()
             }
             Page::RecentlyAdded => {
-                // Iterate in reverse order instead of cloning + reversing
                 self.all_songs
                     .iter()
                     .rev()
@@ -767,7 +768,6 @@ impl AppCore {
                     .collect()
             }
             _ => {
-                // Filter first (using references), clone only matched subset, then sort
                 let mut songs: Vec<Song> = self
                     .all_songs
                     .iter()
@@ -786,7 +786,6 @@ impl AppCore {
     }
 
     fn current_queue_list(&self) -> Vec<SongView> {
-        // Build a lookup map once instead of linear-scanning all_songs per queue item
         let song_map: HashMap<&Path, &Song> = self
             .all_songs
             .iter()

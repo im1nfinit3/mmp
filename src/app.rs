@@ -53,8 +53,10 @@ struct App {
     palette: UiPalette,
 }
 
+/// All events that can drive UI updates.
 #[derive(Debug, Clone)]
 enum Message {
+    /// Periodic timer tick — used to poll playback position and process background events.
     Tick,
     Intent(AppIntent),
     OpenSongMenu {
