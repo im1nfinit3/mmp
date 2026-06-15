@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use iced::task::Task;
@@ -869,8 +871,20 @@ fn toggle_icon_button<'a>(
         .on_press(message)
 }
 
+thread_local! {
+    static ICON_CACHE: RefCell<HashMap<&'static [u8], iced::widget::svg::Handle>> =
+        RefCell::new(HashMap::new());
+}
+
 fn icon_svg<'a>(icon: &'static [u8]) -> iced::widget::Svg<'a, Theme> {
-    svg(iced::widget::svg::Handle::from_memory(icon))
+    let handle = ICON_CACHE.with_borrow_mut(|cache| {
+        cache
+            .entry(icon)
+            .or_insert_with(|| iced::widget::svg::Handle::from_memory(icon))
+            .clone()
+    });
+
+    svg(handle)
         .width(20)
         .height(20)
         .style(|_theme, _status| iced::widget::svg::Style {

@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -196,6 +197,16 @@ pub struct AppCore {
     song_filters: SongFilters,
     started_at: Instant,
     startup_scan_requested: bool,
+    /// Set to true when song/playlist/search/sort/page data changes,
+    /// so `tick()` knows to recompute derived views.
+    views_dirty: bool,
+    /// Cached sorted list of unique artists (rebuilt when songs change).
+    cached_artists: Vec<String>,
+    /// Cached sorted list of unique albums (rebuilt when songs change).
+    cached_albums: Vec<String>,
+    /// In-memory cache of playlist → song membership, rebuilt on PlaylistsChanged.
+    /// Maps playlist_id → set of song paths.
+    playlist_song_cache: HashMap<i64, HashSet<PathBuf>>,
 }
 
 impl AppCore {
@@ -243,6 +254,10 @@ impl AppCore {
             song_filters: SongFilters::new(),
             started_at: Instant::now(),
             startup_scan_requested: false,
+            views_dirty: true,
+            cached_artists: Vec::new(),
+            cached_albums: Vec::new(),
+            playlist_song_cache: HashMap::new(),
         };
         core.refresh_library_views();
         core
@@ -259,15 +274,18 @@ impl AppCore {
         }
     }
 
+    /// Check which playlists contain the given song path.
+    ///
+    /// Uses the in-memory `playlist_song_cache` instead of performing
+    /// a blocking channel round-trip per playlist.
     pub fn song_playlist_memberships(&self, path: &std::path::Path) -> Vec<i64> {
         self.state
             .playlists
             .iter()
             .filter_map(|playlist| {
-                self.library_handle
-                    .get_playlist_songs(playlist.id)
-                    .iter()
-                    .any(|song| song.path == path)
+                self.playlist_song_cache
+                    .get(&playlist.id)
+                    .map_or(false, |paths| paths.contains(path))
                     .then_some(playlist.id)
             })
             .collect()
@@ -297,11 +315,40 @@ impl AppCore {
             effects.extend(self.handle_library_event(event));
         }
 
-        self.refresh_derived_views();
+        if self.views_dirty {
+            self.refresh_derived_views();
+            self.views_dirty = false;
+        }
         effects
     }
 
     pub fn handle_intent(&mut self, intent: AppIntent) -> Vec<AppEffect> {
+        let affects_views = matches!(
+            intent,
+            AppIntent::SelectPage(_)
+                | AppIntent::UpdateSongsSearch(_)
+                | AppIntent::UpdateAlbumsSearch(_)
+                | AppIntent::UpdateArtistsSearch(_)
+                | AppIntent::ActivateAlbum(_)
+                | AppIntent::ActivateArtist(_)
+                | AppIntent::PlaySong(_)
+                | AppIntent::QueueSong(_)
+                | AppIntent::ConfirmCreatePlaylist(_)
+                | AppIntent::ConfirmRenamePlaylist { .. }
+                | AppIntent::ConfirmCreatePlaylistAndAddSong { .. }
+                | AppIntent::ConfirmSaveQueueAsPlaylist(_)
+                | AppIntent::AddSongToPlaylist { .. }
+                | AppIntent::RemoveSongFromPlaylist { .. }
+                | AppIntent::RemoveFromQueue(_)
+                | AppIntent::DeletePlaylist(_)
+                | AppIntent::QueueAllFiltered
+                | AppIntent::AddAllFilteredToPlaylist(_)
+                | AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(_)
+                | AppIntent::SetDefaultSort(_)
+                | AppIntent::ToggleShuffle
+                | AppIntent::ToggleRepeat
+        );
+
         let effects = match intent {
             AppIntent::PlayPause => {
                 if self.queue.current.is_none() {
@@ -492,7 +539,6 @@ impl AppCore {
                 self.state.settings.default_sort = sort;
                 self.state.default_sort = sort;
                 let _ = crate::settings::save_settings(&self.state.settings);
-                self.refresh_derived_views();
                 Vec::new()
             }
             AppIntent::RemoveFromQueue(index) => self.remove_from_queue(index),
@@ -505,7 +551,9 @@ impl AppCore {
             }
         };
 
-        self.refresh_derived_views();
+        if affects_views {
+            self.views_dirty = true;
+        }
         effects
     }
 
@@ -547,7 +595,8 @@ impl AppCore {
         match event {
             LibraryEvent::SongsLoaded { songs } => {
                 self.all_songs = songs;
-                self.refresh_library_views();
+                self.rebuild_cached_aggregations();
+                self.views_dirty = true;
                 Vec::new()
             }
             LibraryEvent::SongsAdded { songs } => {
@@ -559,12 +608,14 @@ impl AppCore {
                         self.all_songs.push(song);
                     }
                 }
-                self.refresh_library_views();
+                self.rebuild_cached_aggregations();
+                self.views_dirty = true;
                 Vec::new()
             }
             LibraryEvent::PlaylistsChanged => {
                 self.state.playlists = self.library_handle.get_playlists();
-                self.refresh_derived_views();
+                self.rebuild_playlist_song_cache();
+                self.views_dirty = true;
                 Vec::new()
             }
             LibraryEvent::ScanStarted => {
@@ -572,7 +623,7 @@ impl AppCore {
                 vec![AppEffect::ShowNotification(String::from("Scanning music library..."))]
             }
             LibraryEvent::ScanComplete { total } => {
-                self.refresh_library_views();
+                self.views_dirty = true;
                 vec![AppEffect::ShowNotification(format!(
                     "Scan complete. {total} new tracks indexed."
                 ))]
@@ -581,27 +632,61 @@ impl AppCore {
         }
     }
 
+    /// Rebuild cached artist and album lists from `all_songs`.
+    fn rebuild_cached_aggregations(&mut self) {
+        let mut artist_set: Vec<String> = self
+            .all_songs
+            .iter()
+            .map(|s| s.artist.clone())
+            .filter(|a| !a.is_empty())
+            .collect();
+        artist_set.sort();
+        artist_set.dedup();
+        self.cached_artists = artist_set;
+
+        let mut album_set: Vec<String> = self
+            .all_songs
+            .iter()
+            .map(|s| s.album.clone())
+            .filter(|a| !a.is_empty())
+            .collect();
+        album_set.sort();
+        album_set.dedup();
+        self.cached_albums = album_set;
+    }
+
+    /// Rebuild the in-memory playlist→song-path cache from the library.
+    fn rebuild_playlist_song_cache(&mut self) {
+        let mut cache: HashMap<i64, HashSet<PathBuf>> = HashMap::new();
+        for playlist in &self.state.playlists {
+            let songs = self.library_handle.get_playlist_songs(playlist.id);
+            let paths: HashSet<PathBuf> = songs.into_iter().map(|s| s.path).collect();
+            cache.insert(playlist.id, paths);
+        }
+        self.playlist_song_cache = cache;
+    }
+
     fn refresh_library_views(&mut self) {
         self.state.playlists = self.library_handle.get_playlists();
-        self.refresh_derived_views();
+        self.views_dirty = true;
     }
 
     fn refresh_derived_views(&mut self) {
         self.state.albums = self
-            .library_handle
-            .get_unique_albums()
-            .into_iter()
+            .cached_albums
+            .iter()
             .filter(|album| album.to_lowercase().contains(&self.state.albums_search.to_lowercase()))
+            .cloned()
             .collect();
         self.state.artists = self
-            .library_handle
-            .get_unique_artists()
-            .into_iter()
+            .cached_artists
+            .iter()
             .filter(|artist| {
                 artist
                     .to_lowercase()
                     .contains(&self.state.artists_search.to_lowercase())
             })
+            .cloned()
             .collect();
         self.state.songs = self.current_song_list();
         self.state.queue = self.current_queue_list();
@@ -610,39 +695,50 @@ impl AppCore {
     }
 
     fn current_song_list(&self) -> Vec<SongView> {
-        let mut songs = match self.state.page {
-            Page::Playlist(id) => self.library_handle.get_playlist_songs(id),
-            Page::RecentlyAdded => {
-                let mut songs = self.all_songs.clone();
-                songs.reverse();
-                return songs
-                    .into_iter()
+        match self.state.page {
+            Page::Playlist(id) => {
+                let songs = self.library_handle.get_playlist_songs(id);
+                songs.into_iter()
                     .filter(|song| self.song_filters.matches(song))
                     .map(|song| self.to_song_view(song))
-                    .collect();
+                    .collect()
             }
-            _ => self.all_songs.clone(),
-        };
+            Page::RecentlyAdded => {
+                // Iterate in reverse order instead of cloning + reversing
+                self.all_songs.iter().rev()
+                    .filter(|song| self.song_filters.matches(song))
+                    .map(|song| self.to_song_view(song.clone()))
+                    .collect()
+            }
+            _ => {
+                // Filter first (using references), clone only matched subset, then sort
+                let mut songs: Vec<Song> = self.all_songs.iter()
+                    .filter(|song| self.song_filters.matches(song))
+                    .cloned()
+                    .collect();
 
-        self.state.default_sort.sort_songs(&mut songs);
+                self.state.default_sort.sort_songs(&mut songs);
 
-        songs.into_iter()
-            .filter(|song| self.song_filters.matches(song))
-            .map(|song| self.to_song_view(song))
-            .collect()
+                songs.into_iter()
+                    .map(|song| self.to_song_view(song))
+                    .collect()
+            }
+        }
     }
 
     fn current_queue_list(&self) -> Vec<SongView> {
+        // Build a lookup map once instead of linear-scanning all_songs per queue item
+        let song_map: HashMap<&Path, &Song> =
+            self.all_songs.iter().map(|s| (s.path.as_path(), s)).collect();
+
         self.queue
             .tracks
             .iter()
             .enumerate()
             .map(|(index, path)| {
-                let song = self
-                    .all_songs
-                    .iter()
-                    .find(|song| song.path == *path)
-                    .cloned()
+                let song = song_map
+                    .get(path.as_path())
+                    .map(|s| (*s).clone())
                     .unwrap_or_else(|| Song::new(path.clone()));
 
                 let mut view = self.to_song_view(song);
@@ -694,7 +790,7 @@ impl AppCore {
         self.state.current_track_label = self.current_track_label_for_path();
         self.state.elapsed_seconds = 0.0;
         self.state.duration_seconds = 0.0;
-        self.refresh_derived_views();
+        self.views_dirty = true;
         Vec::new()
     }
 
@@ -707,7 +803,7 @@ impl AppCore {
             self.state.current_track_label = String::from("No track selected");
             self.state.elapsed_seconds = 0.0;
             self.state.duration_seconds = 0.0;
-            self.refresh_derived_views();
+            self.views_dirty = true;
             Vec::new()
         }
     }
@@ -837,7 +933,7 @@ impl AppCore {
             self.state.duration_seconds = 0.0;
         }
 
-        self.refresh_derived_views();
+        self.views_dirty = true;
         vec![AppEffect::ShowNotification(String::from(
             "Song removed from queue",
         ))]

@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex, mpsc};
 use self::song::Song;
 
 pub mod db;
-pub mod filter;
 pub mod metadata;
 pub mod scan;
 pub mod song;
@@ -30,10 +29,7 @@ enum LibraryCommand {
     GetMetadataCache {
         reply: mpsc::Sender<HashMap<PathBuf, db::FileFingerprint>>,
     },
-    /// Get unique artist names.
-    GetUniqueArtists { reply: mpsc::Sender<Vec<String>> },
-    /// Get unique album names.
-    GetUniqueAlbums { reply: mpsc::Sender<Vec<String>> },
+
     /// Create a new playlist.
     CreatePlaylist {
         name: String,
@@ -114,20 +110,6 @@ impl LibraryHandle {
     pub fn get_metadata_cache(&self) -> HashMap<PathBuf, db::FileFingerprint> {
         let (reply, rx) = mpsc::channel();
         let _ = self.inner.tx.send(LibraryCommand::GetMetadataCache { reply });
-        rx.recv().unwrap_or_default()
-    }
-
-    /// Get sorted unique artist names.
-    pub fn get_unique_artists(&self) -> Vec<String> {
-        let (reply, rx) = mpsc::channel();
-        let _ = self.inner.tx.send(LibraryCommand::GetUniqueArtists { reply });
-        rx.recv().unwrap_or_default()
-    }
-
-    /// Get sorted unique album names.
-    pub fn get_unique_albums(&self) -> Vec<String> {
-        let (reply, rx) = mpsc::channel();
-        let _ = self.inner.tx.send(LibraryCommand::GetUniqueAlbums { reply });
         rx.recv().unwrap_or_default()
     }
 
@@ -297,16 +279,6 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                         .as_ref()
                         .and_then(|conn| db::get_metadata_cache(conn).ok())
                         .unwrap_or_default();
-                    let _ = reply.send(result);
-                }
-
-                LibraryCommand::GetUniqueArtists { reply } => {
-                    let result = filter::unique_artists(&songs);
-                    let _ = reply.send(result);
-                }
-
-                LibraryCommand::GetUniqueAlbums { reply } => {
-                    let result = filter::unique_albums(&songs);
                     let _ = reply.send(result);
                 }
 
