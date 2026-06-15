@@ -207,6 +207,8 @@ pub struct AppCore {
     /// In-memory cache of playlist → song membership, rebuilt on PlaylistsChanged.
     /// Maps playlist_id → set of song paths.
     playlist_song_cache: HashMap<i64, HashSet<PathBuf>>,
+    /// Tracks whether the Shift key is held (for alternate button behaviour).
+    shift_held: bool,
 }
 
 impl AppCore {
@@ -258,6 +260,7 @@ impl AppCore {
             cached_artists: Vec::new(),
             cached_albums: Vec::new(),
             playlist_song_cache: HashMap::new(),
+            shift_held: false,
         };
         core.refresh_library_views();
         core
@@ -265,6 +268,10 @@ impl AppCore {
 
     pub fn state(&self) -> &AppState {
         &self.state
+    }
+
+    pub fn set_shift_held(&mut self, held: bool) {
+        self.shift_held = held;
     }
 
     pub fn current_playlist_id(&self) -> Option<i64> {
@@ -351,7 +358,17 @@ impl AppCore {
 
         let effects = match intent {
             AppIntent::PlayPause => {
-                if self.queue.current.is_none() {
+                if self.shift_held {
+                    // Shift-click: fully stop playback and reset progress to 0
+                    self.playback.stop();
+                    self.queue.current = None;
+                    self.state.playback = PlaybackStatus::Stopped;
+                    self.state.current_track_label = String::from("No track selected");
+                    self.state.elapsed_seconds = 0.0;
+                    self.state.duration_seconds = 0.0;
+                    self.views_dirty = true;
+                    Vec::new()
+                } else if self.queue.current.is_none() {
                     if self.queue.tracks.is_empty() {
                         Vec::new()
                     } else {

@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use iced::task::Task;
 use iced::widget::{
@@ -11,6 +12,7 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Point, Shadow, Subscription, Theme,
     application,
     widget::{pick_list, toggler},
+    keyboard,
 };
 
 use crate::settings;
@@ -67,6 +69,7 @@ enum Message {
     ModalConfirm,
     ModalCancel,
     ClearNotification,
+    ModifiersChanged(bool),
 }
 
 fn boot(startup_palette: UiPalette) -> (App, Task<Message>) {
@@ -92,7 +95,15 @@ fn theme(_app: &App) -> Theme {
 }
 
 fn subscription(_app: &App) -> Subscription<Message> {
-    iced::time::every(std::time::Duration::from_millis(200)).map(|_| Message::Tick)
+    iced::Subscription::batch([
+        iced::time::every(Duration::from_millis(200)).map(|_| Message::Tick),
+        keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::ModifiersChanged(modifiers) => {
+                Some(Message::ModifiersChanged(modifiers.shift()))
+            }
+            _ => None,
+        }),
+    ])
 }
 
 fn update(app: &mut App, message: Message) -> Task<Message> {
@@ -196,6 +207,10 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::ModalCancel => vec![AppEffect::CloseModal],
         Message::ClearNotification => {
             app.notification = None;
+            Vec::new()
+        }
+        Message::ModifiersChanged(shift_held) => {
+            app.core.set_shift_held(shift_held);
             Vec::new()
         }
     };
