@@ -67,6 +67,7 @@ pub enum AppIntent {
     AddSongToPlaylist { playlist_id: i64, path: PathBuf },
     RemoveSongFromPlaylist { playlist_id: i64, path: PathBuf },
     RemoveFromQueue(usize),
+    ClearQueue,
     DeletePlaylist(i64),
     QueueAllFiltered,
     AddAllFilteredToPlaylist(i64),
@@ -347,6 +348,7 @@ impl AppCore {
                 | AppIntent::AddSongToPlaylist { .. }
                 | AppIntent::RemoveSongFromPlaylist { .. }
                 | AppIntent::RemoveFromQueue(_)
+                | AppIntent::ClearQueue
                 | AppIntent::DeletePlaylist(_)
                 | AppIntent::QueueAllFiltered
                 | AppIntent::AddAllFilteredToPlaylist(_)
@@ -558,6 +560,7 @@ impl AppCore {
                 let _ = crate::settings::save_settings(&self.state.settings);
                 Vec::new()
             }
+            AppIntent::ClearQueue => self.clear_queue(),
             AppIntent::RemoveFromQueue(index) => self.remove_from_queue(index),
             AppIntent::DeletePlaylist(id) => {
                 self.library_handle.delete_playlist(id);
@@ -925,6 +928,20 @@ impl AppCore {
             }
             Err(error) => vec![AppEffect::ShowNotification(error)],
         }
+    }
+
+    fn clear_queue(&mut self) -> Vec<AppEffect> {
+        if self.queue.tracks.is_empty() {
+            return Vec::new();
+        }
+
+        self.playback.stop();
+        self.queue.clear();
+        self.state.current_track_label = String::from("No track selected");
+        self.state.elapsed_seconds = 0.0;
+        self.state.duration_seconds = 0.0;
+        self.views_dirty = true;
+        vec![AppEffect::ShowNotification(String::from("Queue cleared"))]
     }
 
     fn remove_from_queue(&mut self, index: usize) -> Vec<AppEffect> {

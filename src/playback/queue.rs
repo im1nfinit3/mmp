@@ -43,6 +43,14 @@ impl QueueState {
     }
 
     /// Remove a track at the given index.
+    /// Remove all tracks from the queue, clearing playback state.
+    pub fn clear(&mut self) {
+        self.tracks.clear();
+        self.current = None;
+        self.unplayed_pool.clear();
+    }
+
+    /// Remove a track at the given index.
     pub fn remove(&mut self, index: usize) {
         if index >= self.tracks.len() {
             return;

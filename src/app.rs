@@ -1054,11 +1054,15 @@ fn song_context_menu_for_path<'a>(
         ));
     }
 
-    if let Some(queue_index) = queue_index {
+    if queue_index.is_some() {
         menu = menu.push(menu_separator());
         menu = menu.push(menu_item_button(
             "Remove from queue",
-            Message::Intent(AppIntent::RemoveFromQueue(queue_index)),
+            Message::Intent(AppIntent::RemoveFromQueue(queue_index.unwrap())),
+        ));
+        menu = menu.push(menu_item_button(
+            "Clear queue",
+            Message::Intent(AppIntent::ClearQueue),
         ));
     }
 
