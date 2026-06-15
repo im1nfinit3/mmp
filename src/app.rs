@@ -143,7 +143,8 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                     ActiveModal::CreatePlaylist { name }
                     | ActiveModal::RenamePlaylist { name, .. }
                     | ActiveModal::CreatePlaylistAndAddSong { name, .. }
-                    | ActiveModal::SaveQueueAsPlaylist { name } => *name = value,
+                    | ActiveModal::SaveQueueAsPlaylist { name }
+                    | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => *name = value,
                 }
             }
             Vec::new()
@@ -157,7 +158,8 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                 ActiveModal::CreatePlaylist { name }
                 | ActiveModal::RenamePlaylist { name, .. }
                 | ActiveModal::CreatePlaylistAndAddSong { name, .. }
-                | ActiveModal::SaveQueueAsPlaylist { name } => !name.trim().is_empty(),
+                | ActiveModal::SaveQueueAsPlaylist { name }
+                | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => !name.trim().is_empty(),
             };
 
             let mut effects = match modal {
@@ -173,6 +175,9 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                 ActiveModal::SaveQueueAsPlaylist { name } => {
                     app.core.handle_intent(AppIntent::ConfirmSaveQueueAsPlaylist(name))
                 }
+                ActiveModal::CreatePlaylistAndAddAllFiltered { name } => app
+                    .core
+                    .handle_intent(AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name)),
             };
 
             if should_close
@@ -702,13 +707,15 @@ fn view_modal_overlay<'a>(
         ActiveModal::RenamePlaylist { .. } => "Rename playlist",
         ActiveModal::CreatePlaylistAndAddSong { .. } => "Create playlist and add song",
         ActiveModal::SaveQueueAsPlaylist { .. } => "Save queue as playlist",
+        ActiveModal::CreatePlaylistAndAddAllFiltered { .. } => "Create playlist and add all matching",
     };
 
     let body: Element<'a, Message> = match modal {
         ActiveModal::CreatePlaylist { name }
         | ActiveModal::RenamePlaylist { name, .. }
         | ActiveModal::CreatePlaylistAndAddSong { name, .. }
-        | ActiveModal::SaveQueueAsPlaylist { name } => column![
+        | ActiveModal::SaveQueueAsPlaylist { name }
+        | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => column![
             text_input("Playlist name", name)
                 .on_input(Message::ModalTextChanged)
                 .on_submit(Message::ModalConfirm)
@@ -942,6 +949,12 @@ fn song_context_menu_for_path<'a>(
     }
 
     menu = menu.push(menu_separator());
+    menu = menu.push(menu_item_button(
+        "Queue all matching",
+        Message::Intent(AppIntent::QueueAllFiltered),
+    ));
+
+    menu = menu.push(menu_separator());
     menu = menu.push(
         text("Add to playlist")
             .size(13)
@@ -974,7 +987,36 @@ fn song_context_menu_for_path<'a>(
 
     menu = menu.push(menu_item_button_variant(
         "Create new",
-        Message::Intent(AppIntent::OpenCreatePlaylistAndAddSong { path }),
+        Message::Intent(AppIntent::OpenCreatePlaylistAndAddSong { path: path.clone() }),
+        true,
+    ));
+
+    menu = menu.push(menu_separator());
+    menu = menu.push(
+        text("Add all matching to playlist")
+            .size(13)
+            .color(COLOR_DIM)
+            .width(Length::Fill),
+    );
+
+    if playlists.is_empty() {
+        menu = menu.push(
+            container(text("No playlists yet").size(14).color(COLOR_DIM))
+                .padding([10, 12])
+                .width(Length::Fill),
+        );
+    } else {
+        for playlist in playlists {
+            menu = menu.push(menu_item_button(
+                &playlist.name,
+                Message::Intent(AppIntent::AddAllFilteredToPlaylist(playlist.id)),
+            ));
+        }
+    }
+
+    menu = menu.push(menu_item_button_variant(
+        "Create new",
+        Message::Intent(AppIntent::OpenCreatePlaylistAndAddAllFiltered),
         true,
     ));
 
@@ -1388,9 +1430,14 @@ fn song_context_menu_size(
     has_queue_remove_action: bool,
 ) -> (f32, f32) {
     let base_rows =
-        4 + usize::from(has_playlist_remove_action) + usize::from(has_queue_remove_action);
-    let estimated_height = 28.0 + (base_rows as f32 * 38.0) + (playlist_count as f32 * 38.0);
-    (CONTEXT_MENU_WIDTH, estimated_height.min(360.0))
+        6 + usize::from(has_playlist_remove_action) + usize::from(has_queue_remove_action);
+    let estimated_height = 28.0
+        + (base_rows as f32 * 38.0)
+        + (playlist_count as f32 * 38.0)
+        + 38.0
+        + (playlist_count as f32 * 38.0)
+        + 38.0;
+    (CONTEXT_MENU_WIDTH, estimated_height.min(400.0))
 }
 
 fn menu_separator<'a>() -> iced::widget::Rule<'a, Theme> {

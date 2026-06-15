@@ -25,6 +25,7 @@ pub enum ActiveModal {
     RenamePlaylist { id: i64, name: String },
     CreatePlaylistAndAddSong { path: PathBuf, name: String },
     SaveQueueAsPlaylist { name: String },
+    CreatePlaylistAndAddAllFiltered { name: String },
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +65,10 @@ pub enum AppIntent {
     RemoveSongFromPlaylist { playlist_id: i64, path: PathBuf },
     RemoveFromQueue(usize),
     DeletePlaylist(i64),
+    QueueAllFiltered,
+    AddAllFilteredToPlaylist(i64),
+    OpenCreatePlaylistAndAddAllFiltered,
+    ConfirmCreatePlaylistAndAddAllFiltered(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -410,6 +415,42 @@ impl AppCore {
                     "Song removed from playlist",
                 ))]
             }
+            AppIntent::QueueAllFiltered => {
+                let paths: Vec<PathBuf> = self
+                    .current_song_list()
+                    .into_iter()
+                    .map(|s| s.path)
+                    .collect();
+                let count = paths.len();
+                for path in paths {
+                    self.queue.push(path);
+                }
+                vec![AppEffect::ShowNotification(format!("Queued {count} songs"))]
+            }
+            AppIntent::AddAllFilteredToPlaylist(id) => {
+                let paths: Vec<PathBuf> = self
+                    .current_song_list()
+                    .into_iter()
+                    .map(|s| s.path)
+                    .collect();
+                let count = paths.len();
+                for path in paths {
+                    self.library_handle.add_to_playlist(id, path);
+                }
+                vec![AppEffect::ShowNotification(format!(
+                    "Added {count} songs to playlist"
+                ))]
+            }
+            AppIntent::OpenCreatePlaylistAndAddAllFiltered => {
+                vec![AppEffect::OpenModal(
+                    ActiveModal::CreatePlaylistAndAddAllFiltered {
+                        name: String::new(),
+                    },
+                )]
+            }
+            AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name) => {
+                self.create_playlist_and_add_all_filtered(&name)
+            }
             AppIntent::RemoveFromQueue(index) => self.remove_from_queue(index),
             AppIntent::DeletePlaylist(id) => {
                 self.library_handle.delete_playlist(id);
@@ -671,6 +712,29 @@ impl AppCore {
                 self.state.page = Page::Playlist(id);
                 vec![AppEffect::ShowNotification(format!(
                     "Created playlist \"{trimmed}\""
+                ))]
+            }
+            Err(error) => vec![AppEffect::ShowNotification(error)],
+        }
+    }
+
+    fn create_playlist_and_add_all_filtered(&mut self, name: &str) -> Vec<AppEffect> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return vec![AppEffect::ShowNotification(String::from(
+                "Playlist name cannot be empty",
+            ))];
+        }
+
+        match self.library_handle.create_playlist(trimmed) {
+            Ok(id) => {
+                for song in self.current_song_list() {
+                    self.library_handle.add_to_playlist(id, song.path);
+                }
+                self.state.playlists = self.library_handle.get_playlists();
+                self.state.page = Page::Playlist(id);
+                vec![AppEffect::ShowNotification(format!(
+                    "Created playlist \"{trimmed}\" and added all matching songs"
                 ))]
             }
             Err(error) => vec![AppEffect::ShowNotification(error)],
