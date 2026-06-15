@@ -406,15 +406,6 @@ fn view_nav<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Mess
             .on_press(Message::Intent(AppIntent::SelectPage(Page::Settings))),
     );
 
-    nav = nav.push(Space::new().height(Length::Fill));
-    nav = nav.push(
-        button("Create playlist")
-            .width(Length::Fill)
-            .padding([13, 14])
-            .style(ghost_button_style)
-            .on_press(Message::Intent(AppIntent::OpenCreatePlaylist)),
-    );
-
     container(scrollable(nav))
         .width(260)
         .height(Length::Fill)
@@ -835,6 +826,10 @@ fn menu_item_button_variant<'a>(
 fn playlist_context_menu<'a>(playlist_id: i64) -> iced::widget::Column<'a, Message> {
     column![
         menu_item_button(
+            "Create playlist",
+            Message::Intent(AppIntent::OpenCreatePlaylist),
+        ),
+        menu_item_button(
             "Rename playlist",
             Message::Intent(AppIntent::OpenRenamePlaylist { id: playlist_id }),
         ),
@@ -880,7 +875,7 @@ fn view_context_menu_overlay<'a>(context_menu: &'a ContextMenu) -> Element<'a, M
             )
         }
         ContextMenu::Playlist { id, position } => (
-            (210.0, 110.0),
+            (210.0, 150.0),
             *position,
             playlist_context_menu(*id).into(),
         ),

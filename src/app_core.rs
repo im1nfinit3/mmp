@@ -57,6 +57,7 @@ pub enum AppIntent {
     OpenRenamePlaylist { id: i64 },
     OpenCreatePlaylistAndAddSong { path: PathBuf },
     OpenSaveQueueAsPlaylist,
+
     ConfirmCreatePlaylist(String),
     ConfirmRenamePlaylist { id: i64, name: String },
     ConfirmCreatePlaylistAndAddSong { name: String, path: PathBuf },
