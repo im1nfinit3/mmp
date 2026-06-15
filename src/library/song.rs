@@ -1,6 +1,6 @@
 //! Pure data types for the music library.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const UNKNOWN_ARTIST: &str = "Unknown Artist";
 pub const UNKNOWN_ALBUM: &str = "Unknown Album";
@@ -36,7 +36,7 @@ impl Song {
 
 }
 
-pub fn fallback_title_for_path(path: &PathBuf) -> String {
+pub fn fallback_title_for_path(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Unknown")

@@ -229,14 +229,14 @@ fn view(app: &App) -> Element<'_, Message> {
     )
     .on_move(Message::CursorMoved);
 
-    let mut layers: Vec<Element<'_, Message>> = vec![opaque(body).into()];
+    let mut layers: Vec<Element<'_, Message>> = vec![opaque(body)];
 
     if let Some(context_menu) = &app.context_menu {
-        layers.push(opaque(view_context_menu_overlay(context_menu)).into());
+        layers.push(opaque(view_context_menu_overlay(context_menu)));
     }
 
     if let Some(modal) = &app.active_modal {
-        layers.push(opaque(view_modal_overlay(state, modal, palette)).into());
+        layers.push(opaque(view_modal_overlay(state, modal, palette)));
     }
 
     stack(layers).width(Length::Fill).height(Length::Fill).into()

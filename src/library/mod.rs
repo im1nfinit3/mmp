@@ -269,14 +269,13 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                 LibraryCommand::AddSongs { songs: new_songs } => {
                     let mut metadata_save_error: Option<String> = None;
                     for song in &new_songs {
-                        if let Some(conn) = &library_db {
-                            if let Err(err) = db::save_song(conn, song) {
-                                if metadata_save_error.is_none() {
-                                    metadata_save_error = Some(format!(
-                                        "Failed to save library metadata: {err}"
-                                    ));
-                                }
-                            }
+                        if let Some(conn) = &library_db
+                            && let Err(err) = db::save_song(conn, song)
+                            && metadata_save_error.is_none()
+                        {
+                            metadata_save_error = Some(format!(
+                                "Failed to save library metadata: {err}"
+                            ));
                         }
                         if let Some(&idx) = by_path.get(&song.path) {
                             songs[idx] = song.clone();
@@ -378,13 +377,12 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                 } => {
                     if let Some(conn) = &playlists_db {
                         // Look up the Song by path in our in-memory store
-                        if let Some(&idx) = by_path.get(&song_path) {
-                            if let Err(err) = db::add_song_to_playlist(conn, playlist_id, &songs[idx])
-                            {
-                                let _ = event_tx.send(LibraryEvent::Error(format!(
-                                    "Failed to add song to playlist: {err}"
-                                )));
-                            }
+                        if let Some(&idx) = by_path.get(&song_path)
+                            && let Err(err) = db::add_song_to_playlist(conn, playlist_id, &songs[idx])
+                        {
+                            let _ = event_tx.send(LibraryEvent::Error(format!(
+                                "Failed to add song to playlist: {err}"
+                            )));
                         }
                     } else {
                         let _ = event_tx.send(LibraryEvent::Error(String::from(
