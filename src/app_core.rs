@@ -891,7 +891,7 @@ impl AppCore {
                     "Created playlist \"{trimmed}\""
                 ))]
             }
-            Err(error) => vec![AppEffect::ShowNotification(error)],
+            Err(error) => vec![AppEffect::ShowNotification(error.to_string())],
         }
     }
 
@@ -927,7 +927,7 @@ impl AppCore {
                     "Created playlist \"{trimmed}\""
                 ))]
             }
-            Err(error) => vec![AppEffect::ShowNotification(error)],
+            Err(error) => vec![AppEffect::ShowNotification(error.to_string())],
         }
     }
 
@@ -950,7 +950,7 @@ impl AppCore {
                     "Created playlist \"{trimmed}\" and added all matching songs"
                 ))]
             }
-            Err(error) => vec![AppEffect::ShowNotification(error)],
+            Err(error) => vec![AppEffect::ShowNotification(error.to_string())],
         }
     }
 
@@ -973,7 +973,7 @@ impl AppCore {
                     "Saved queue as \"{trimmed}\""
                 ))]
             }
-            Err(error) => vec![AppEffect::ShowNotification(error)],
+            Err(error) => vec![AppEffect::ShowNotification(error.to_string())],
         }
     }
 

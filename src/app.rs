@@ -1,6 +1,6 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use iced::task::Task;
@@ -901,18 +901,16 @@ fn toggle_icon_button<'a>(
         .on_press(message)
 }
 
-thread_local! {
-    static ICON_CACHE: RefCell<HashMap<&'static [u8], iced::widget::svg::Handle>> =
-        RefCell::new(HashMap::new());
-}
+static ICON_CACHE: LazyLock<Mutex<HashMap<&'static [u8], iced::widget::svg::Handle>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn icon_svg<'a>(icon: &'static [u8]) -> iced::widget::Svg<'a, Theme> {
-    let handle = ICON_CACHE.with_borrow_mut(|cache| {
-        cache
-            .entry(icon)
-            .or_insert_with(|| iced::widget::svg::Handle::from_memory(icon))
-            .clone()
-    });
+    let handle = ICON_CACHE
+        .lock()
+        .expect("icon cache lock")
+        .entry(icon)
+        .or_insert_with(|| iced::widget::svg::Handle::from_memory(icon))
+        .clone();
 
     svg(handle)
         .width(20)

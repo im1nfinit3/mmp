@@ -13,6 +13,37 @@ use std::time::Duration;
 
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 
+// ---------------------------------------------------------------------------
+// Playback errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during playback operations.
+#[derive(Debug)]
+pub enum PlaybackError {
+    /// Could not open the file.
+    FileOpen {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Could not decode the audio stream.
+    Decode { path: PathBuf, detail: String },
+}
+
+impl std::fmt::Display for PlaybackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FileOpen { path, source } => {
+                write!(f, "Failed to open {}: {source}", path.display())
+            }
+            Self::Decode { path, detail } => {
+                write!(f, "Failed to decode {}: {detail}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for PlaybackError {}
+
 use crate::library::metadata::{self, TrackMetadata};
 
 #[derive(Clone, Debug)]
@@ -148,7 +179,7 @@ fn run_playback_thread(
                         let _ = event_tx.send(PlaybackEvent::StateChanged(PlaybackState::Playing));
                     }
                     Err(err) => {
-                        let _ = event_tx.send(PlaybackEvent::Error(err));
+                        let _ = event_tx.send(PlaybackEvent::Error(err.to_string()));
                     }
                 }
             }
@@ -225,14 +256,18 @@ fn start_playback(
     muted: bool,
     event_tx: &mpsc::Sender<PlaybackEvent>,
     eos_tx: &mpsc::Sender<u64>,
-) -> Result<ActivePlayback, String> {
+) -> Result<ActivePlayback, PlaybackError> {
     let metadata = metadata::read_track_metadata(path).ok();
     emit_track_tags(event_tx, metadata.as_ref());
 
-    let file = std::fs::File::open(path)
-        .map_err(|err| format!("Failed to open {}: {err}", path.display()))?;
-    let decoder = Decoder::try_from(file)
-        .map_err(|err| format!("Failed to decode {}: {err}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|source| PlaybackError::FileOpen {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let decoder = Decoder::try_from(file).map_err(|err| PlaybackError::Decode {
+        path: path.to_path_buf(),
+        detail: err.to_string(),
+    })?;
 
     let player = Player::connect_new(sink_handle.mixer());
     player.set_volume(effective_volume(volume, muted) as f32);

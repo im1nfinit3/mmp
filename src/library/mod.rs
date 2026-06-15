@@ -7,10 +7,38 @@
 //! (microseconds for in-memory HashMap + Vec operations).
 
 use std::collections::HashMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
 use self::song::Song;
+
+// ---------------------------------------------------------------------------
+// Library errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during library operations.
+#[derive(Debug)]
+pub enum LibraryError {
+    /// Database operation failed.
+    Db(String),
+    /// A database connection was not available.
+    Unavailable(String),
+    /// The library actor thread disconnected.
+    Disconnected,
+}
+
+impl fmt::Display for LibraryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Db(msg) => write!(f, "{msg}"),
+            Self::Unavailable(msg) => write!(f, "{msg}"),
+            Self::Disconnected => write!(f, "Library actor disconnected"),
+        }
+    }
+}
+
+impl std::error::Error for LibraryError {}
 
 pub mod db;
 pub mod metadata;
@@ -33,7 +61,7 @@ enum LibraryCommand {
     /// Create a new playlist.
     CreatePlaylist {
         name: String,
-        reply: mpsc::Sender<Result<i64, String>>,
+        reply: mpsc::Sender<Result<i64, LibraryError>>,
     },
     /// Delete a playlist.
     DeletePlaylist { id: i64 },
@@ -117,14 +145,20 @@ impl LibraryHandle {
     }
 
     /// Create a playlist. Returns the new playlist id.
-    pub fn create_playlist(&self, name: &str) -> Result<i64, String> {
+    pub fn create_playlist(&self, name: &str) -> Result<i64, LibraryError> {
         let (reply, rx) = mpsc::channel();
-        let _ = self.inner.tx.send(LibraryCommand::CreatePlaylist {
-            name: name.to_string(),
-            reply,
-        });
-        rx.recv()
-            .unwrap_or(Err("Library actor disconnected".into()))
+        if self
+            .inner
+            .tx
+            .send(LibraryCommand::CreatePlaylist {
+                name: name.to_string(),
+                reply,
+            })
+            .is_err()
+        {
+            return Err(LibraryError::Disconnected);
+        }
+        rx.recv().unwrap_or(Err(LibraryError::Disconnected))
     }
 
     /// Delete a playlist by id.
@@ -293,9 +327,10 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                 LibraryCommand::CreatePlaylist { name, reply } => {
                     let result = playlists_db
                         .as_ref()
-                        .ok_or("No playlists database".to_string())
+                        .ok_or_else(|| LibraryError::Unavailable("No playlists database".into()))
                         .and_then(|conn| {
-                            db::create_playlist(conn, &name).map_err(|e| e.to_string())
+                            db::create_playlist(conn, &name)
+                                .map_err(|e| LibraryError::Db(e.to_string()))
                         });
                     if result.is_ok() {
                         if let Some(conn) = playlists_db.as_ref()

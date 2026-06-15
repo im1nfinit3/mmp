@@ -1,13 +1,38 @@
 //! Persistent application settings stored via SQLite (key-value).
-//!
-//! Zero new dependencies — reuses the existing `rusqlite` crate.
 
 use rusqlite::{Connection, params};
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::app_core::Page;
 use crate::library::db;
 use crate::library::song::Song;
+
+// ---------------------------------------------------------------------------
+// Settings errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur when reading or writing settings.
+#[derive(Debug)]
+pub enum SettingsError {
+    /// A database operation failed.
+    Db(String),
+    /// Failed to save a specific setting key.
+    Save { key: String, detail: String },
+}
+
+impl fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Db(msg) => write!(f, "{msg}"),
+            Self::Save { key, detail } => {
+                write!(f, "Failed to save setting '{key}': {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SettingsError {}
 
 // ---------------------------------------------------------------------------
 // Sort method for song-list views
@@ -175,12 +200,13 @@ CREATE TABLE IF NOT EXISTS settings (
 ";
 
 /// Open (or create) the settings database.
-fn open_settings_db() -> Result<Connection, String> {
+fn open_settings_db() -> Result<Connection, SettingsError> {
     let path = db::config_dir().join(SETTINGS_DB_FILENAME);
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to open settings db: {e}"))?;
+    let conn = Connection::open(&path)
+        .map_err(|e| SettingsError::Db(format!("Failed to open settings db: {e}")))?;
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
     conn.execute_batch(SETTINGS_DDL)
-        .map_err(|e| format!("Failed to create settings table: {e}"))?;
+        .map_err(|e| SettingsError::Db(format!("Failed to create settings table: {e}")))?;
     Ok(conn)
 }
 
@@ -214,16 +240,19 @@ pub fn load_settings() -> Settings {
 }
 
 /// Persist the given settings to the database.
-pub fn save_settings(settings: &Settings) -> Result<(), String> {
+pub fn save_settings(settings: &Settings) -> Result<(), SettingsError> {
     let conn = open_settings_db()?;
 
-    let upsert = |key: &str, value: &str| -> Result<(), String> {
+    let upsert = |key: &str, value: &str| -> Result<(), SettingsError> {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )
-        .map_err(|e| format!("Failed to save setting '{key}': {e}"))?;
+        .map_err(|e| SettingsError::Save {
+            key: key.to_string(),
+            detail: e.to_string(),
+        })?;
         Ok(())
     };
 
