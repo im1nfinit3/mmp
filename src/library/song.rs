@@ -36,7 +36,6 @@ impl Song {
             && self.album != UNKNOWN_ALBUM
             && !self.duration_str.is_empty()
     }
-
 }
 
 pub fn fallback_title_for_path(path: &Path) -> String {
@@ -61,5 +60,4 @@ impl RepeatMode {
             Self::One => Self::Off,
         }
     }
-
 }

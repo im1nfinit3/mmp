@@ -138,10 +138,22 @@ mod tests {
     use iced::Color;
 
     fn approx_eq(left: Color, right: Color) {
-        assert!((left.r - right.r).abs() < 0.0001, "r: {left:?} != {right:?}");
-        assert!((left.g - right.g).abs() < 0.0001, "g: {left:?} != {right:?}");
-        assert!((left.b - right.b).abs() < 0.0001, "b: {left:?} != {right:?}");
-        assert!((left.a - right.a).abs() < 0.0001, "a: {left:?} != {right:?}");
+        assert!(
+            (left.r - right.r).abs() < 0.0001,
+            "r: {left:?} != {right:?}"
+        );
+        assert!(
+            (left.g - right.g).abs() < 0.0001,
+            "g: {left:?} != {right:?}"
+        );
+        assert!(
+            (left.b - right.b).abs() < 0.0001,
+            "b: {left:?} != {right:?}"
+        );
+        assert!(
+            (left.a - right.a).abs() < 0.0001,
+            "a: {left:?} != {right:?}"
+        );
     }
 
     #[test]
@@ -152,7 +164,11 @@ mod tests {
     #[test]
     fn mix_interpolates_colors() {
         approx_eq(
-            mix(Color::from_rgb(0.0, 0.0, 0.0), Color::from_rgb(1.0, 0.5, 0.25), 0.5),
+            mix(
+                Color::from_rgb(0.0, 0.0, 0.0),
+                Color::from_rgb(1.0, 0.5, 0.25),
+                0.5,
+            ),
             Color::from_rgb(0.5, 0.25, 0.125),
         );
     }

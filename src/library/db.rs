@@ -186,9 +186,8 @@ pub fn get_metadata_cache(
 
 /// Load every cached song from the library database.
 pub fn get_all_songs(conn: &Connection) -> SqlResult<Vec<Song>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, path, title, artist, album, duration_str FROM songs",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, path, title, artist, album, duration_str FROM songs")?;
     let rows = stmt.query_map([], |row| {
         Ok(Song {
             db_id: row.get(0)?,

@@ -186,9 +186,8 @@ fn open_settings_db() -> Result<Connection, String> {
 
 /// Load settings from the database. Returns `Default` if the DB or row is missing.
 pub fn load_settings() -> Settings {
-    let conn = match open_settings_db() {
-        Ok(c) => c,
-        Err(_) => return Settings::default(),
+    let Ok(conn) = open_settings_db() else {
+        return Settings::default();
     };
 
     let get_str = |key: &str| -> Option<String> {
@@ -208,9 +207,9 @@ pub fn load_settings() -> Settings {
         default_view: get_str("default_view")
             .filter(|v| Settings::ALL_VIEWS.contains(&v.as_str()))
             .unwrap_or_else(|| String::from("RecentlyAdded")),
-        default_sort: get_str("default_sort")
-            .map(|v| SortMethod::from_str(&v))
-            .unwrap_or(SortMethod::TimeAddedNewestFirst),
+        default_sort: get_str("default_sort").map_or(SortMethod::TimeAddedNewestFirst, |v| {
+            SortMethod::from_str(&v)
+        }),
     }
 }
 

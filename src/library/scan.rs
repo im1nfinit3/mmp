@@ -27,13 +27,11 @@ pub fn start_scan(
     let (path_tx, path_rx) = mpsc::channel::<Vec<PathBuf>>();
 
     std::thread::spawn(move || {
-        let music_dir = library_folder
-            .or_else(|| dirs::audio_dir())
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("Music")
-            });
+        let music_dir = library_folder.or_else(dirs::audio_dir).unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Music")
+        });
 
         let mut batch = Vec::with_capacity(WALK_BATCH_SIZE);
 

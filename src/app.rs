@@ -5,22 +5,21 @@ use std::time::Duration;
 
 use iced::task::Task;
 use iced::widget::{
-    Space, button, column, container, mouse_area, opaque, row, scrollable, slider,
-    stack, svg, text, text_input,
+    Space, button, column, container, mouse_area, opaque, row, scrollable, slider, stack, svg,
+    text, text_input,
 };
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Point, Shadow, Subscription, Theme,
-    application,
+    application, keyboard,
     widget::{pick_list, toggler},
-    keyboard,
 };
 
-use crate::settings;
-use crate::system_accent::{self, UiPalette};
 use crate::app_core::{
     ActiveModal, AppCore, AppEffect, AppIntent, AppState, Page, PlaybackStatus, SongView,
 };
 use crate::library::song::RepeatMode;
+use crate::settings;
+use crate::system_accent::{self, UiPalette};
 
 const ICON_PREVIOUS: &[u8] = include_bytes!("icons/previous.svg");
 const ICON_PLAY: &[u8] = include_bytes!("icons/play.svg");
@@ -177,18 +176,18 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             };
 
             let mut effects = match modal {
-                ActiveModal::CreatePlaylist { name } => {
-                    app.core.handle_intent(AppIntent::ConfirmCreatePlaylist(name))
-                }
-                ActiveModal::RenamePlaylist { id, name } => {
-                    app.core.handle_intent(AppIntent::ConfirmRenamePlaylist { id, name })
-                }
+                ActiveModal::CreatePlaylist { name } => app
+                    .core
+                    .handle_intent(AppIntent::ConfirmCreatePlaylist(name)),
+                ActiveModal::RenamePlaylist { id, name } => app
+                    .core
+                    .handle_intent(AppIntent::ConfirmRenamePlaylist { id, name }),
                 ActiveModal::CreatePlaylistAndAddSong { path, name } => app
                     .core
                     .handle_intent(AppIntent::ConfirmCreatePlaylistAndAddSong { name, path }),
-                ActiveModal::SaveQueueAsPlaylist { name } => {
-                    app.core.handle_intent(AppIntent::ConfirmSaveQueueAsPlaylist(name))
-                }
+                ActiveModal::SaveQueueAsPlaylist { name } => app
+                    .core
+                    .handle_intent(AppIntent::ConfirmSaveQueueAsPlaylist(name)),
                 ActiveModal::CreatePlaylistAndAddAllFiltered { name } => app
                     .core
                     .handle_intent(AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name)),
@@ -262,7 +261,10 @@ fn view(app: &App) -> Element<'_, Message> {
         layers.push(opaque(view_modal_overlay(state, modal, palette)));
     }
 
-    stack(layers).width(Length::Fill).height(Length::Fill).into()
+    stack(layers)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn view_header<'a>(
@@ -348,9 +350,11 @@ fn view_header<'a>(
     .align_y(Alignment::Center)
     .width(236);
 
-    let mut header = column![row![controls, progress, volume]
-        .spacing(22)
-        .align_y(Alignment::Center)]
+    let mut header = column![
+        row![controls, progress, volume]
+            .spacing(22)
+            .align_y(Alignment::Center)
+    ]
     .spacing(14);
 
     if let Some(note) = notification.or(state.status_message.as_deref()) {
@@ -403,7 +407,9 @@ fn view_nav<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Mess
                     let palette = *palette;
                     move |theme, status| nav_button_style(theme, status, is_active, &palette)
                 })
-                .on_press(Message::Intent(AppIntent::SelectPage(Page::Playlist(playlist.id)))),
+                .on_press(Message::Intent(AppIntent::SelectPage(Page::Playlist(
+                    playlist.id,
+                )))),
         )
         .on_right_press(Message::OpenPlaylistMenu(playlist.id));
 
@@ -453,18 +459,20 @@ fn page_button<'a>(
 
 fn view_content<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
     let content: Element<'a, Message> = match &state.page {
-        Page::RecentlyAdded => {
-            view_song_list(
-                "Recently added",
-                "Search songs",
-                &state.songs_search,
-                &state.songs,
-                palette,
-            )
-        }
-        Page::Songs => {
-            view_song_list("Songs", "Search songs", &state.songs_search, &state.songs, palette)
-        }
+        Page::RecentlyAdded => view_song_list(
+            "Recently added",
+            "Search songs",
+            &state.songs_search,
+            &state.songs,
+            palette,
+        ),
+        Page::Songs => view_song_list(
+            "Songs",
+            "Search songs",
+            &state.songs_search,
+            &state.songs,
+            palette,
+        ),
         Page::Playlist(id) => {
             let title = state
                 .playlists
@@ -472,7 +480,13 @@ fn view_content<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, 
                 .find(|playlist| playlist.id == *id)
                 .map(|playlist| playlist.name.as_str())
                 .unwrap_or("Playlist");
-            view_song_list(title, "Filter playlist", &state.songs_search, &state.songs, palette)
+            view_song_list(
+                title,
+                "Filter playlist",
+                &state.songs_search,
+                &state.songs,
+                palette,
+            )
         }
         Page::Albums => view_string_list(
             "Albums",
@@ -652,15 +666,17 @@ where
 }
 
 fn view_queue<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
-    let mut list = column![row![
-        text("Queue").size(22),
-        Space::new().width(Length::Fill),
-        button("Save queue as playlist")
-            .padding([10, 14])
-            .style(ghost_button_style)
-            .on_press(Message::Intent(AppIntent::OpenSaveQueueAsPlaylist))
+    let mut list = column![
+        row![
+            text("Queue").size(22),
+            Space::new().width(Length::Fill),
+            button("Save queue as playlist")
+                .padding([10, 14])
+                .style(ghost_button_style)
+                .on_press(Message::Intent(AppIntent::OpenSaveQueueAsPlaylist))
+        ]
+        .align_y(Alignment::Center)
     ]
-    .align_y(Alignment::Center)]
     .spacing(18);
 
     if state.queue.is_empty() {
@@ -716,29 +732,24 @@ fn view_settings<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a,
             text("Settings").size(22),
             Space::new().height(16),
             text("Library folder").size(16).color(COLOR_DIM),
-            text_input(
-                "Default: ~/Music (or your system audio dir)",
-                &folder_value,
-            )
-            .on_input(|value| Message::Intent(AppIntent::SetLibraryFolder(value)))
-            .padding([10, 14])
-            .width(600)
-            .style({
-                let palette = *palette;
-                move |theme, status| search_input_style(theme, status, &palette)
-            }),
-            text(
-                "Leave empty to use your system's default Music directory.",
-            )
-            .size(13)
-            .color(COLOR_DIM),
+            text_input("Default: ~/Music (or your system audio dir)", &folder_value,)
+                .on_input(|value| Message::Intent(AppIntent::SetLibraryFolder(value)))
+                .padding([10, 14])
+                .width(600)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| search_input_style(theme, status, &palette)
+                }),
+            text("Leave empty to use your system's default Music directory.",)
+                .size(13)
+                .color(COLOR_DIM),
             Space::new().height(16),
             scan_toggle,
             Space::new().height(16),
             text("Default view").size(16).color(COLOR_DIM),
             row![
                 pick_list(
-                    &settings::Settings::ALL_VIEWS[..],
+                    settings::Settings::ALL_VIEWS,
                     Some(state.settings.default_view.as_str()),
                     |selected| Message::Intent(AppIntent::SetDefaultView(selected.to_string())),
                 )
@@ -756,10 +767,12 @@ fn view_settings<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a,
             ],
             Space::new().height(16),
             text("Default sort").size(16).color(COLOR_DIM),
-            text("Applies to Songs and Playlist views").size(13).color(COLOR_DIM),
+            text("Applies to Songs and Playlist views")
+                .size(13)
+                .color(COLOR_DIM),
             row![
                 pick_list(
-                    &SORT_LABELS[..],
+                    SORT_LABELS,
                     Some(state.settings.default_sort.label()),
                     |selected| {
                         let sort = crate::settings::SortMethod::ALL
@@ -805,7 +818,9 @@ fn view_modal_overlay<'a>(
         ActiveModal::RenamePlaylist { .. } => "Rename playlist",
         ActiveModal::CreatePlaylistAndAddSong { .. } => "Create playlist and add song",
         ActiveModal::SaveQueueAsPlaylist { .. } => "Save queue as playlist",
-        ActiveModal::CreatePlaylistAndAddAllFiltered { .. } => "Create playlist and add all matching",
+        ActiveModal::CreatePlaylistAndAddAllFiltered { .. } => {
+            "Create playlist and add all matching"
+        }
     };
 
     let body: Element<'a, Message> = match modal {
@@ -965,8 +980,7 @@ fn view_context_menu_overlay<'a>(context_menu: &'a ContextMenu) -> Element<'a, M
         (f32, f32),
         Point,
         Element<'a, Message>,
-    ) =
-        match context_menu {
+    ) = match context_menu {
         ContextMenu::Song {
             path,
             position,
@@ -974,12 +988,11 @@ fn view_context_menu_overlay<'a>(context_menu: &'a ContextMenu) -> Element<'a, M
             queue_index,
             playlists,
         } => {
-            let (menu_width, menu_height) =
-                song_context_menu_size(
-                    playlists.len(),
-                    current_playlist_id.is_some(),
-                    queue_index.is_some(),
-                );
+            let (menu_width, menu_height) = song_context_menu_size(
+                playlists.len(),
+                current_playlist_id.is_some(),
+                queue_index.is_some(),
+            );
 
             (
                 (menu_width, menu_height),
@@ -993,11 +1006,9 @@ fn view_context_menu_overlay<'a>(context_menu: &'a ContextMenu) -> Element<'a, M
                 ),
             )
         }
-        ContextMenu::Playlist { id, position } => (
-            (210.0, 150.0),
-            *position,
-            playlist_context_menu(*id).into(),
-        ),
+        ContextMenu::Playlist { id, position } => {
+            ((210.0, 150.0), *position, playlist_context_menu(*id).into())
+        }
     };
 
     let (x, y) = clamp_menu_position(position, menu_width, menu_height);
@@ -1035,7 +1046,10 @@ fn song_context_menu_for_path<'a>(
     menu_height: f32,
 ) -> Element<'a, Message> {
     let mut menu = column![
-        menu_item_button("Play now", Message::Intent(AppIntent::PlaySong(path.clone()))),
+        menu_item_button(
+            "Play now",
+            Message::Intent(AppIntent::PlaySong(path.clone()))
+        ),
         menu_item_button(
             "Queue track",
             Message::Intent(AppIntent::QueueSong(path.clone())),
@@ -1054,11 +1068,11 @@ fn song_context_menu_for_path<'a>(
         ));
     }
 
-    if queue_index.is_some() {
+    if let Some(idx) = queue_index {
         menu = menu.push(menu_separator());
         menu = menu.push(menu_item_button(
             "Remove from queue",
-            Message::Intent(AppIntent::RemoveFromQueue(queue_index.unwrap())),
+            Message::Intent(AppIntent::RemoveFromQueue(idx)),
         ));
         menu = menu.push(menu_item_button(
             "Clear queue",
@@ -1138,8 +1152,7 @@ fn song_context_menu_for_path<'a>(
         true,
     ));
 
-    container(scrollable(menu).height(menu_height))
-        .into()
+    container(scrollable(menu).height(menu_height)).into()
 }
 
 #[derive(Clone, Debug)]
@@ -1249,8 +1262,7 @@ fn nav_button_style(
     let background = match status {
         iced::widget::button::Status::Hovered => hover_bg,
         iced::widget::button::Status::Pressed => COLOR_BORDER,
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => base_bg,
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => base_bg,
     };
 
     iced::widget::button::Style {
@@ -1273,8 +1285,9 @@ fn control_button_style(
     let background = match status {
         iced::widget::button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.22),
         iced::widget::button::Status::Pressed => Color::from_rgb(0.24, 0.24, 0.26),
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => Color::from_rgb(0.16, 0.16, 0.18),
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+            Color::from_rgb(0.16, 0.16, 0.18)
+        }
     };
 
     iced::widget::button::Style {
@@ -1355,10 +1368,7 @@ fn toggler_style(
     }
 }
 
-fn menu_style(
-    _theme: &Theme,
-    palette: &UiPalette,
-) -> iced::widget::overlay::menu::Style {
+fn menu_style(_theme: &Theme, palette: &UiPalette) -> iced::widget::overlay::menu::Style {
     iced::widget::overlay::menu::Style {
         background: iced::Background::Color(Color::from_rgb(0.12, 0.12, 0.13)),
         border: iced::Border {
@@ -1404,8 +1414,9 @@ fn ghost_button_style(
     let background = match status {
         iced::widget::button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.19),
         iced::widget::button::Status::Pressed => Color::from_rgb(0.22, 0.22, 0.23),
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+            Color::TRANSPARENT
+        }
     };
 
     iced::widget::button::Style {
@@ -1447,8 +1458,9 @@ fn list_button_style(
     let background = match status {
         iced::widget::button::Status::Hovered => palette.accent_soft,
         iced::widget::button::Status::Pressed => COLOR_ROW_ACTIVE,
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+            Color::TRANSPARENT
+        }
     };
 
     iced::widget::button::Style {
@@ -1467,8 +1479,9 @@ fn menu_item_button_style(
     let background = match status {
         iced::widget::button::Status::Hovered => COLOR_ROW_ACTIVE,
         iced::widget::button::Status::Pressed => Color::from_rgb(0.20, 0.20, 0.21),
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+            Color::TRANSPARENT
+        }
     };
 
     iced::widget::button::Style {
@@ -1496,8 +1509,9 @@ fn menu_item_button_variant_style(
     let background = match status {
         iced::widget::button::Status::Hovered => COLOR_ROW_ACTIVE,
         iced::widget::button::Status::Pressed => Color::from_rgb(0.20, 0.20, 0.21),
-        iced::widget::button::Status::Disabled
-        | iced::widget::button::Status::Active => Color::TRANSPARENT,
+        iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+            Color::TRANSPARENT
+        }
     };
 
     iced::widget::button::Style {
@@ -1521,8 +1535,9 @@ fn search_input_style(
     let border_color = match status {
         iced::widget::text_input::Status::Focused { .. } => palette.accent,
         iced::widget::text_input::Status::Hovered => Color::from_rgb(0.35, 0.35, 0.37),
-        iced::widget::text_input::Status::Active
-        | iced::widget::text_input::Status::Disabled => COLOR_BORDER,
+        iced::widget::text_input::Status::Active | iced::widget::text_input::Status::Disabled => {
+            COLOR_BORDER
+        }
     };
 
     iced::widget::text_input::Style {
@@ -1608,7 +1623,10 @@ enum ContextMenu {
         queue_index: Option<usize>,
         playlists: Vec<SongPlaylistMenuItem>,
     },
-    Playlist { id: i64, position: Point },
+    Playlist {
+        id: i64,
+        position: Point,
+    },
 }
 
 fn clamp_menu_position(position: Point, menu_width: f32, menu_height: f32) -> (f32, f32) {

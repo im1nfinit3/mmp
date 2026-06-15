@@ -56,16 +56,32 @@ pub enum AppIntent {
     PlaySong(PathBuf),
     QueueSong(PathBuf),
     OpenCreatePlaylist,
-    OpenRenamePlaylist { id: i64 },
-    OpenCreatePlaylistAndAddSong { path: PathBuf },
+    OpenRenamePlaylist {
+        id: i64,
+    },
+    OpenCreatePlaylistAndAddSong {
+        path: PathBuf,
+    },
     OpenSaveQueueAsPlaylist,
 
     ConfirmCreatePlaylist(String),
-    ConfirmRenamePlaylist { id: i64, name: String },
-    ConfirmCreatePlaylistAndAddSong { name: String, path: PathBuf },
+    ConfirmRenamePlaylist {
+        id: i64,
+        name: String,
+    },
+    ConfirmCreatePlaylistAndAddSong {
+        name: String,
+        path: PathBuf,
+    },
     ConfirmSaveQueueAsPlaylist(String),
-    AddSongToPlaylist { playlist_id: i64, path: PathBuf },
-    RemoveSongFromPlaylist { playlist_id: i64, path: PathBuf },
+    AddSongToPlaylist {
+        playlist_id: i64,
+        path: PathBuf,
+    },
+    RemoveSongFromPlaylist {
+        playlist_id: i64,
+        path: PathBuf,
+    },
     RemoveFromQueue(usize),
     ClearQueue,
     DeletePlaylist(i64),
@@ -293,7 +309,7 @@ impl AppCore {
             .filter_map(|playlist| {
                 self.playlist_song_cache
                     .get(&playlist.id)
-                    .map_or(false, |paths| paths.contains(path))
+                    .is_some_and(|paths| paths.contains(path))
                     .then_some(playlist.id)
             })
             .collect()
@@ -471,13 +487,18 @@ impl AppCore {
                     .find(|playlist| playlist.id == id)
                     .map(|playlist| playlist.name.clone())
                     .unwrap_or_default();
-                vec![AppEffect::OpenModal(ActiveModal::RenamePlaylist { id, name })]
+                vec![AppEffect::OpenModal(ActiveModal::RenamePlaylist {
+                    id,
+                    name,
+                })]
             }
             AppIntent::OpenCreatePlaylistAndAddSong { path } => {
-                vec![AppEffect::OpenModal(ActiveModal::CreatePlaylistAndAddSong {
-                    path,
-                    name: String::new(),
-                })]
+                vec![AppEffect::OpenModal(
+                    ActiveModal::CreatePlaylistAndAddSong {
+                        path,
+                        name: String::new(),
+                    },
+                )]
             }
             AppIntent::OpenSaveQueueAsPlaylist => {
                 vec![AppEffect::OpenModal(ActiveModal::SaveQueueAsPlaylist {
@@ -539,8 +560,11 @@ impl AppCore {
                 self.create_playlist_and_add_all_filtered(&name)
             }
             AppIntent::SetLibraryFolder(folder) => {
-                self.state.settings.library_folder =
-                    if folder.trim().is_empty() { None } else { Some(folder.trim().to_string()) };
+                self.state.settings.library_folder = if folder.trim().is_empty() {
+                    None
+                } else {
+                    Some(folder.trim().to_string())
+                };
                 let _ = crate::settings::save_settings(&self.state.settings);
                 Vec::new()
             }
@@ -621,7 +645,10 @@ impl AppCore {
             }
             LibraryEvent::SongsAdded { songs } => {
                 for song in songs {
-                    if let Some(existing) = self.all_songs.iter_mut().find(|item| item.path == song.path)
+                    if let Some(existing) = self
+                        .all_songs
+                        .iter_mut()
+                        .find(|item| item.path == song.path)
                     {
                         *existing = song;
                     } else {
@@ -640,7 +667,9 @@ impl AppCore {
             }
             LibraryEvent::ScanStarted => {
                 self.state.scan_started = true;
-                vec![AppEffect::ShowNotification(String::from("Scanning music library..."))]
+                vec![AppEffect::ShowNotification(String::from(
+                    "Scanning music library...",
+                ))]
             }
             LibraryEvent::ScanComplete { total } => {
                 self.views_dirty = true;
@@ -695,7 +724,11 @@ impl AppCore {
         self.state.albums = self
             .cached_albums
             .iter()
-            .filter(|album| album.to_lowercase().contains(&self.state.albums_search.to_lowercase()))
+            .filter(|album| {
+                album
+                    .to_lowercase()
+                    .contains(&self.state.albums_search.to_lowercase())
+            })
             .cloned()
             .collect();
         self.state.artists = self
@@ -718,28 +751,34 @@ impl AppCore {
         match self.state.page {
             Page::Playlist(id) => {
                 let songs = self.library_handle.get_playlist_songs(id);
-                songs.into_iter()
+                songs
+                    .into_iter()
                     .filter(|song| self.song_filters.matches(song))
                     .map(|song| self.to_song_view(song))
                     .collect()
             }
             Page::RecentlyAdded => {
                 // Iterate in reverse order instead of cloning + reversing
-                self.all_songs.iter().rev()
+                self.all_songs
+                    .iter()
+                    .rev()
                     .filter(|song| self.song_filters.matches(song))
                     .map(|song| self.to_song_view(song.clone()))
                     .collect()
             }
             _ => {
                 // Filter first (using references), clone only matched subset, then sort
-                let mut songs: Vec<Song> = self.all_songs.iter()
+                let mut songs: Vec<Song> = self
+                    .all_songs
+                    .iter()
                     .filter(|song| self.song_filters.matches(song))
                     .cloned()
                     .collect();
 
                 self.state.default_sort.sort_songs(&mut songs);
 
-                songs.into_iter()
+                songs
+                    .into_iter()
                     .map(|song| self.to_song_view(song))
                     .collect()
             }
@@ -748,8 +787,11 @@ impl AppCore {
 
     fn current_queue_list(&self) -> Vec<SongView> {
         // Build a lookup map once instead of linear-scanning all_songs per queue item
-        let song_map: HashMap<&Path, &Song> =
-            self.all_songs.iter().map(|s| (s.path.as_path(), s)).collect();
+        let song_map: HashMap<&Path, &Song> = self
+            .all_songs
+            .iter()
+            .map(|s| (s.path.as_path(), s))
+            .collect();
 
         self.queue
             .tracks
@@ -789,7 +831,12 @@ impl AppCore {
 
     fn current_track_label_for_path(&self) -> String {
         self.current_track_path()
-            .and_then(|path| self.all_songs.iter().find(|song| song.path == path).cloned())
+            .and_then(|path| {
+                self.all_songs
+                    .iter()
+                    .find(|song| song.path == path)
+                    .cloned()
+            })
             .map(|song| {
                 if song.artist.is_empty() {
                     song.title

@@ -109,7 +109,10 @@ impl LibraryHandle {
 
     pub fn get_metadata_cache(&self) -> HashMap<PathBuf, db::FileFingerprint> {
         let (reply, rx) = mpsc::channel();
-        let _ = self.inner.tx.send(LibraryCommand::GetMetadataCache { reply });
+        let _ = self
+            .inner
+            .tx
+            .send(LibraryCommand::GetMetadataCache { reply });
         rx.recv().unwrap_or_default()
     }
 
@@ -178,7 +181,13 @@ impl Drop for LibraryHandle {
         }
 
         let _ = self.inner.tx.send(LibraryCommand::Shutdown);
-        if let Some(worker) = self.inner.worker.lock().ok().and_then(|mut worker| worker.take()) {
+        if let Some(worker) = self
+            .inner
+            .worker
+            .lock()
+            .ok()
+            .and_then(|mut worker| worker.take())
+        {
             let _ = worker.join();
         }
     }
@@ -255,9 +264,8 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                             && let Err(err) = db::save_song(conn, song)
                             && metadata_save_error.is_none()
                         {
-                            metadata_save_error = Some(format!(
-                                "Failed to save library metadata: {err}"
-                            ));
+                            metadata_save_error =
+                                Some(format!("Failed to save library metadata: {err}"));
                         }
                         if let Some(&idx) = by_path.get(&song.path) {
                             songs[idx] = song.clone();
@@ -350,7 +358,8 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                     if let Some(conn) = &playlists_db {
                         // Look up the Song by path in our in-memory store
                         if let Some(&idx) = by_path.get(&song_path)
-                            && let Err(err) = db::add_song_to_playlist(conn, playlist_id, &songs[idx])
+                            && let Err(err) =
+                                db::add_song_to_playlist(conn, playlist_id, &songs[idx])
                         {
                             let _ = event_tx.send(LibraryEvent::Error(format!(
                                 "Failed to add song to playlist: {err}"
@@ -369,7 +378,8 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                     song_path,
                 } => {
                     if let Some(conn) = &playlists_db {
-                        if let Err(err) = db::remove_song_from_playlist(conn, playlist_id, &song_path)
+                        if let Err(err) =
+                            db::remove_song_from_playlist(conn, playlist_id, &song_path)
                         {
                             let _ = event_tx.send(LibraryEvent::Error(format!(
                                 "Failed to remove song from playlist: {err}"
