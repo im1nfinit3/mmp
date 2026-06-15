@@ -156,6 +156,7 @@ pub fn get_metadata_cache(
     let rows = stmt.query_map(params![CURRENT_METADATA_VERSION], |row| {
         let path = PathBuf::from(row.get::<_, String>(0)?);
         let song = Song {
+            db_id: 0,
             path: path.clone(),
             title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
@@ -185,14 +186,17 @@ pub fn get_metadata_cache(
 
 /// Load every cached song from the library database.
 pub fn get_all_songs(conn: &Connection) -> SqlResult<Vec<Song>> {
-    let mut stmt = conn.prepare("SELECT path, title, artist, album, duration_str FROM songs")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, path, title, artist, album, duration_str FROM songs",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok(Song {
-            path: PathBuf::from(row.get::<_, String>(0)?),
-            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            duration_str: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            db_id: row.get(0)?,
+            path: PathBuf::from(row.get::<_, String>(1)?),
+            title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            artist: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            album: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            duration_str: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
         })
     })?;
 
@@ -303,7 +307,7 @@ pub fn remove_song_from_playlist(
 /// Load all songs in a playlist, in position order.
 pub fn get_playlist_songs(conn: &Connection, playlist_id: i64) -> SqlResult<Vec<Song>> {
     let mut stmt = conn.prepare(
-        "SELECT s.path, s.title, s.artist, s.album, s.duration_str
+        "SELECT s.id, s.path, s.title, s.artist, s.album, s.duration_str
          FROM songs s
          JOIN playlist_songs ps ON s.id = ps.song_id
          WHERE ps.playlist_id = ?1
@@ -312,11 +316,12 @@ pub fn get_playlist_songs(conn: &Connection, playlist_id: i64) -> SqlResult<Vec<
 
     let rows = stmt.query_map(params![playlist_id], |row| {
         Ok(Song {
-            path: PathBuf::from(row.get::<_, String>(0)?),
-            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            duration_str: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            db_id: row.get(0)?,
+            path: PathBuf::from(row.get::<_, String>(1)?),
+            title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            artist: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            album: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            duration_str: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
         })
     })?;
 

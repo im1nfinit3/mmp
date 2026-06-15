@@ -6,11 +6,12 @@ use iced::widget::{
     stack, svg, text, text_input,
 };
 use iced::{
-    Alignment, Background, Border, Color, Element, Length, Point, Settings, Shadow, Subscription,
-    Theme,
+    Alignment, Background, Border, Color, Element, Length, Point, Shadow, Subscription, Theme,
     application,
+    widget::{pick_list, toggler},
 };
 
+use crate::settings;
 use crate::system_accent::{self, UiPalette};
 use crate::app_core::{
     ActiveModal, AppCore, AppEffect, AppIntent, AppState, Page, PlaybackStatus, SongView,
@@ -35,7 +36,7 @@ pub fn run() -> iced::Result {
         .title(title)
         .theme(theme)
         .subscription(subscription)
-        .settings(Settings::default())
+        .settings(iced::Settings::default())
         .window_size((1240.0, 820.0))
         .run()
 }
@@ -475,7 +476,7 @@ fn view_content<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, 
             |value| Message::Intent(AppIntent::ActivateArtist(value)),
         ),
         Page::Queue => view_queue(state, palette),
-        Page::Settings => view_settings(state),
+        Page::Settings => view_settings(state, palette),
     };
 
     container(content)
@@ -668,23 +669,112 @@ fn view_queue<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Me
     list.into()
 }
 
-fn view_settings<'a>(state: &'a AppState) -> Element<'a, Message> {
+fn view_settings<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a, Message> {
+    let folder_value = state
+        .settings
+        .library_folder
+        .as_deref()
+        .unwrap_or("")
+        .to_string();
+
+    let scan_toggle = toggler(state.settings.scan_on_startup)
+        .label("Scan music library on startup")
+        .on_toggle(|value| Message::Intent(AppIntent::SetScanOnStartup(value)))
+        .spacing(10)
+        .style({
+            let palette = *palette;
+            move |theme, status| toggler_style(theme, status, &palette)
+        });
+
+    const SORT_LABELS: &[&str] = &[
+        "Alphabetical (artist)",
+        "Alphabetical (album)",
+        "Alphabetical (title)",
+        "Time added (newest first)",
+        "Time added (oldest first)",
+    ];
+
     container(
         column![
             text("Settings").size(22),
-            text("This migration keeps settings minimal.").size(15),
-            text(if state.scan_started {
-                "Startup scan has started."
-            } else {
-                "Startup scan is waiting for the first render tick."
-            })
-            .size(14)
+            Space::new().height(16),
+            text("Library folder").size(16).color(COLOR_DIM),
+            text_input(
+                "Default: ~/Music (or your system audio dir)",
+                &folder_value,
+            )
+            .on_input(|value| Message::Intent(AppIntent::SetLibraryFolder(value)))
+            .padding([10, 14])
+            .width(600)
+            .style({
+                let palette = *palette;
+                move |theme, status| search_input_style(theme, status, &palette)
+            }),
+            text(
+                "Leave empty to use your system's default Music directory.",
+            )
+            .size(13)
             .color(COLOR_DIM),
+            Space::new().height(16),
+            scan_toggle,
+            Space::new().height(16),
+            text("Default view").size(16).color(COLOR_DIM),
+            row![
+                pick_list(
+                    &settings::Settings::ALL_VIEWS[..],
+                    Some(state.settings.default_view.as_str()),
+                    |selected| Message::Intent(AppIntent::SetDefaultView(selected.to_string())),
+                )
+                .padding([10, 14])
+                .width(360)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| pick_list_style(theme, status, &palette)
+                })
+                .menu_style({
+                    let palette = *palette;
+                    move |theme| menu_style(theme, &palette)
+                }),
+                Space::new().width(Length::Fill),
+            ],
+            Space::new().height(16),
+            text("Default sort").size(16).color(COLOR_DIM),
+            text("Applies to Songs and Playlist views").size(13).color(COLOR_DIM),
+            row![
+                pick_list(
+                    &SORT_LABELS[..],
+                    Some(state.settings.default_sort.label()),
+                    |selected| {
+                        let sort = crate::settings::SortMethod::ALL
+                            .iter()
+                            .find(|s| s.label() == selected)
+                            .copied()
+                            .unwrap_or(crate::settings::SortMethod::TimeAddedNewestFirst);
+                        Message::Intent(AppIntent::SetDefaultSort(sort))
+                    },
+                )
+                .padding([10, 14])
+                .width(360)
+                .style({
+                    let palette = *palette;
+                    move |theme, status| pick_list_style(theme, status, &palette)
+                })
+                .menu_style({
+                    let palette = *palette;
+                    move |theme| menu_style(theme, &palette)
+                }),
+                Space::new().width(Length::Fill),
+            ],
+            Space::new().height(24),
+            text("About").size(16).color(COLOR_DIM),
+            text("mmp — A native Rust music player built with Iced")
+                .size(14)
+                .color(COLOR_DIM),
         ]
-        .spacing(12),
+        .spacing(10),
     )
-    .padding(18)
-    .style(song_list_panel_style)
+    .padding([18, 20])
+    .style(content_panel_style)
     .into()
 }
 
@@ -1196,6 +1286,81 @@ fn toggle_icon_button_style(
         },
         shadow: Shadow::default(),
         ..Default::default()
+    }
+}
+
+fn toggler_style(
+    _theme: &Theme,
+    status: iced::widget::toggler::Status,
+    palette: &UiPalette,
+) -> iced::widget::toggler::Style {
+    let is_toggled = match status {
+        iced::widget::toggler::Status::Active { is_toggled } => is_toggled,
+        iced::widget::toggler::Status::Hovered { is_toggled } => is_toggled,
+        iced::widget::toggler::Status::Disabled { is_toggled } => is_toggled,
+    };
+
+    let (background, border_color) = if is_toggled {
+        (Background::Color(palette.accent), palette.accent_border)
+    } else {
+        (
+            Background::Color(Color::from_rgb(0.40, 0.40, 0.42)),
+            Color::from_rgb(0.50, 0.50, 0.52),
+        )
+    };
+
+    iced::widget::toggler::Style {
+        background,
+        background_border_width: 1.0,
+        background_border_color: border_color,
+        foreground: Background::Color(Color::from_rgb(0.92, 0.92, 0.93)),
+        foreground_border_width: 1.0,
+        foreground_border_color: Color::from_rgb(0.60, 0.60, 0.62),
+        text_color: Some(COLOR_TEXT),
+        border_radius: None,
+        padding_ratio: 0.3,
+    }
+}
+
+fn menu_style(
+    _theme: &Theme,
+    palette: &UiPalette,
+) -> iced::widget::overlay::menu::Style {
+    iced::widget::overlay::menu::Style {
+        background: iced::Background::Color(Color::from_rgb(0.12, 0.12, 0.13)),
+        border: iced::Border {
+            radius: RADIUS_INPUT.into(),
+            width: 1.0,
+            color: COLOR_BORDER_SUBTLE,
+        },
+        text_color: COLOR_TEXT,
+        selected_text_color: COLOR_TEXT,
+        selected_background: iced::Background::Color(palette.accent_soft),
+        shadow: iced::Shadow::default(),
+    }
+}
+
+fn pick_list_style(
+    _theme: &Theme,
+    status: iced::widget::pick_list::Status,
+    palette: &UiPalette,
+) -> iced::widget::pick_list::Style {
+    let border_color = match status {
+        iced::widget::pick_list::Status::Active => COLOR_BORDER,
+        iced::widget::pick_list::Status::Hovered => Color::from_rgb(0.35, 0.35, 0.37),
+        iced::widget::pick_list::Status::Opened { .. } => palette.accent,
+    };
+
+    iced::widget::pick_list::Style {
+        placeholder_color: COLOR_DIM,
+        text_color: COLOR_TEXT,
+        background: iced::Background::Color(Color::from_rgb(0.10, 0.10, 0.11)),
+        border: iced::Border {
+            radius: RADIUS_INPUT.into(),
+            width: 1.0,
+            color: border_color,
+        },
+        handle_color: palette.accent,
     }
 }
 

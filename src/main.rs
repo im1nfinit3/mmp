@@ -2,6 +2,7 @@ mod app;
 mod app_core;
 mod library;
 mod playback;
+mod settings;
 mod system_accent;
 
 fn main() {

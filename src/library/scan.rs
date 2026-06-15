@@ -14,18 +14,26 @@ const WALK_BATCH_SIZE: usize = 200;
 const SONG_BATCH_SIZE: usize = 25;
 
 /// Start an async directory scan.
-pub fn start_scan(library_handle: LibraryHandle, event_tx: mpsc::Sender<LibraryEvent>) {
+///
+/// If `library_folder` is `None`, the platform default audio directory is used.
+pub fn start_scan(
+    library_handle: LibraryHandle,
+    event_tx: mpsc::Sender<LibraryEvent>,
+    library_folder: Option<PathBuf>,
+) {
     let _ = event_tx.send(LibraryEvent::ScanStarted);
     let metadata_cache = library_handle.get_metadata_cache();
 
     let (path_tx, path_rx) = mpsc::channel::<Vec<PathBuf>>();
 
     std::thread::spawn(move || {
-        let music_dir = dirs::audio_dir().unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("Music")
-        });
+        let music_dir = library_folder
+            .or_else(|| dirs::audio_dir())
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("Music")
+            });
 
         let mut batch = Vec::with_capacity(WALK_BATCH_SIZE);
 

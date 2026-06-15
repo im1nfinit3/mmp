@@ -7,6 +7,7 @@ use crate::library::scan;
 use crate::library::song::{RepeatMode, Song};
 use crate::library::{LibraryEvent, LibraryHandle};
 use crate::playback::{Playback, PlaybackEvent, PlaybackState, QueueState};
+use crate::settings::{Settings, SortMethod};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -70,6 +71,11 @@ pub enum AppIntent {
     AddAllFilteredToPlaylist(i64),
     OpenCreatePlaylistAndAddAllFiltered,
     ConfirmCreatePlaylistAndAddAllFiltered(String),
+    /// Settings intents
+    SetLibraryFolder(String),
+    SetScanOnStartup(bool),
+    SetDefaultView(String),
+    SetDefaultSort(SortMethod),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +117,8 @@ pub struct AppState {
     pub repeat: RepeatMode,
     pub scan_started: bool,
     pub status_message: Option<String>,
+    pub settings: Settings,
+    pub default_sort: SortMethod,
 }
 
 struct SongFilters {
@@ -198,6 +206,9 @@ impl AppCore {
         let mut playback = Playback::new(playback_tx);
         playback.set_volume(0.7);
 
+        let settings = crate::settings::load_settings();
+        let startup_page = settings.startup_page();
+
         let mut core = Self {
             library_handle,
             library_rx,
@@ -207,7 +218,7 @@ impl AppCore {
             queue: QueueState::new(),
             all_songs: Vec::new(),
             state: AppState {
-                page: Page::RecentlyAdded,
+                page: startup_page,
                 playlists: Vec::new(),
                 songs: Vec::new(),
                 queue: Vec::new(),
@@ -226,6 +237,8 @@ impl AppCore {
                 repeat: RepeatMode::Off,
                 scan_started: false,
                 status_message: None,
+                settings: settings.clone(),
+                default_sort: settings.default_sort,
             },
             song_filters: SongFilters::new(),
             started_at: Instant::now(),
@@ -263,8 +276,15 @@ impl AppCore {
     pub fn tick(&mut self) -> Vec<AppEffect> {
         if !self.startup_scan_requested && self.started_at.elapsed() >= Duration::from_millis(300) {
             self.startup_scan_requested = true;
-            self.state.scan_started = true;
-            scan::start_scan(self.library_handle.clone(), self.library_event_tx.clone());
+            if self.state.settings.scan_on_startup {
+                self.state.scan_started = true;
+                let folder = self.state.settings.effective_library_folder();
+                scan::start_scan(
+                    self.library_handle.clone(),
+                    self.library_event_tx.clone(),
+                    Some(folder),
+                );
+            }
         }
 
         let mut effects = Vec::new();
@@ -452,6 +472,29 @@ impl AppCore {
             AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name) => {
                 self.create_playlist_and_add_all_filtered(&name)
             }
+            AppIntent::SetLibraryFolder(folder) => {
+                self.state.settings.library_folder =
+                    if folder.trim().is_empty() { None } else { Some(folder.trim().to_string()) };
+                let _ = crate::settings::save_settings(&self.state.settings);
+                Vec::new()
+            }
+            AppIntent::SetScanOnStartup(enabled) => {
+                self.state.settings.scan_on_startup = enabled;
+                let _ = crate::settings::save_settings(&self.state.settings);
+                Vec::new()
+            }
+            AppIntent::SetDefaultView(view) => {
+                self.state.settings.default_view = view;
+                let _ = crate::settings::save_settings(&self.state.settings);
+                Vec::new()
+            }
+            AppIntent::SetDefaultSort(sort) => {
+                self.state.settings.default_sort = sort;
+                self.state.default_sort = sort;
+                let _ = crate::settings::save_settings(&self.state.settings);
+                self.refresh_derived_views();
+                Vec::new()
+            }
             AppIntent::RemoveFromQueue(index) => self.remove_from_queue(index),
             AppIntent::DeletePlaylist(id) => {
                 self.library_handle.delete_playlist(id);
@@ -567,15 +610,21 @@ impl AppCore {
     }
 
     fn current_song_list(&self) -> Vec<SongView> {
-        let songs = match self.state.page {
+        let mut songs = match self.state.page {
             Page::Playlist(id) => self.library_handle.get_playlist_songs(id),
             Page::RecentlyAdded => {
                 let mut songs = self.all_songs.clone();
                 songs.reverse();
-                songs
+                return songs
+                    .into_iter()
+                    .filter(|song| self.song_filters.matches(song))
+                    .map(|song| self.to_song_view(song))
+                    .collect();
             }
             _ => self.all_songs.clone(),
         };
+
+        self.state.default_sort.sort_songs(&mut songs);
 
         songs.into_iter()
             .filter(|song| self.song_filters.matches(song))
@@ -806,6 +855,7 @@ mod tests {
             artist: artist.to_string(),
             album: album.to_string(),
             duration_str: String::from("3:00"),
+            db_id: 0,
         }
     }
 

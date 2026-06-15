@@ -13,6 +13,8 @@ pub struct Song {
     pub artist: String,
     pub album: String,
     pub duration_str: String,
+    /// Database row id (0 if not yet persisted).
+    pub db_id: i64,
 }
 
 impl Song {
@@ -24,6 +26,7 @@ impl Song {
             artist: String::from(UNKNOWN_ARTIST),
             album: String::from(UNKNOWN_ALBUM),
             duration_str: String::new(),
+            db_id: 0,
         }
     }
 
