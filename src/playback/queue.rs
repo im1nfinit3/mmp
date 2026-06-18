@@ -372,8 +372,8 @@ mod tests {
 
         // Display: [0 (history), next (current), ...remaining pool]
         let indices = q.display_indices();
-        assert_eq!(indices[0], 0);          // history first
-        assert_eq!(indices[1], next);        // current
+        assert_eq!(indices[0], 0); // history first
+        assert_eq!(indices[1], next); // current
         // Pool should follow in pre-shuffled order
         assert_eq!(indices.len(), 3);
     }

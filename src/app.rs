@@ -306,8 +306,37 @@ fn view_header<'a>(
     .spacing(10)
     .width(336);
 
+    let now_playing_info = {
+        let mut col = column![].spacing(4);
+        if state.current_song_title.is_empty() && state.current_song_artist.is_empty() {
+            col = col.push(text(&state.current_track_label).size(20));
+        } else {
+            col = col.push(text(&state.current_song_title).size(20));
+            if !state.current_song_artist.is_empty() || !state.current_song_album.is_empty() {
+                let mut detail_parts: Vec<Element<'_, Message>> = Vec::new();
+                if !state.current_song_artist.is_empty() {
+                    detail_parts.push(
+                        text(&state.current_song_artist).size(14).color(COLOR_DIM).into(),
+                    );
+                }
+                if !state.current_song_album.is_empty() {
+                    if !detail_parts.is_empty() {
+                        detail_parts.push(
+                            text(" • ").size(14).color(COLOR_DIM).into(),
+                        );
+                    }
+                    detail_parts.push(
+                        text(&state.current_song_album).size(14).color(COLOR_DIM).into(),
+                    );
+                }
+                col = col.push(row(detail_parts).spacing(0));
+            }
+        }
+        col
+    };
+
     let progress = column![
-        text(&state.current_track_label).size(20),
+        now_playing_info,
         row![
             text(format_time(state.elapsed_seconds)).size(14).width(56),
             slider(

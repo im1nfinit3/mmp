@@ -56,32 +56,16 @@ pub enum AppIntent {
     PlaySong(PathBuf),
     QueueSong(PathBuf),
     OpenCreatePlaylist,
-    OpenRenamePlaylist {
-        id: i64,
-    },
-    OpenCreatePlaylistAndAddSong {
-        path: PathBuf,
-    },
+    OpenRenamePlaylist { id: i64 },
+    OpenCreatePlaylistAndAddSong { path: PathBuf },
     OpenSaveQueueAsPlaylist,
 
     ConfirmCreatePlaylist(String),
-    ConfirmRenamePlaylist {
-        id: i64,
-        name: String,
-    },
-    ConfirmCreatePlaylistAndAddSong {
-        name: String,
-        path: PathBuf,
-    },
+    ConfirmRenamePlaylist { id: i64, name: String },
+    ConfirmCreatePlaylistAndAddSong { name: String, path: PathBuf },
     ConfirmSaveQueueAsPlaylist(String),
-    AddSongToPlaylist {
-        playlist_id: i64,
-        path: PathBuf,
-    },
-    RemoveSongFromPlaylist {
-        playlist_id: i64,
-        path: PathBuf,
-    },
+    AddSongToPlaylist { playlist_id: i64, path: PathBuf },
+    RemoveSongFromPlaylist { playlist_id: i64, path: PathBuf },
     RemoveFromQueue(usize),
     ClearQueue,
     DeletePlaylist(i64),
@@ -125,6 +109,9 @@ pub struct AppState {
     pub albums_search: String,
     pub artists_search: String,
     pub current_track_label: String,
+    pub current_song_title: String,
+    pub current_song_artist: String,
+    pub current_song_album: String,
     pub playback: PlaybackStatus,
     pub elapsed_seconds: f64,
     pub duration_seconds: f64,
@@ -257,6 +244,9 @@ impl AppCore {
                 albums_search: String::new(),
                 artists_search: String::new(),
                 current_track_label: String::from("No track selected"),
+                current_song_title: String::new(),
+                current_song_artist: String::new(),
+                current_song_album: String::new(),
                 playback: PlaybackStatus::Stopped,
                 elapsed_seconds: 0.0,
                 duration_seconds: 0.0,
@@ -384,6 +374,9 @@ impl AppCore {
                     self.queue.current = None;
                     self.state.playback = PlaybackStatus::Stopped;
                     self.state.current_track_label = String::from("No track selected");
+                    self.state.current_song_title = String::new();
+                    self.state.current_song_artist = String::new();
+                    self.state.current_song_album = String::new();
                     self.state.elapsed_seconds = 0.0;
                     self.state.duration_seconds = 0.0;
                     self.views_dirty = true;
@@ -617,7 +610,14 @@ impl AppCore {
                 Vec::new()
             }
             PlaybackEvent::EndOfStream => self.advance_track(),
-            PlaybackEvent::Tags { title, artist } => {
+            PlaybackEvent::Tags {
+                title,
+                artist,
+                album,
+            } => {
+                self.state.current_song_title = title.clone().unwrap_or_default();
+                self.state.current_song_artist = artist.clone().unwrap_or_default();
+                self.state.current_song_album = album.clone().unwrap_or_default();
                 self.state.current_track_label = match (title, artist) {
                     (Some(title), Some(artist)) if !artist.is_empty() => {
                         format!("{title} - {artist}")
@@ -765,14 +765,13 @@ impl AppCore {
                     .map(|song| self.to_song_view(song))
                     .collect()
             }
-            Page::RecentlyAdded => {
-                self.all_songs
-                    .iter()
-                    .rev()
-                    .filter(|song| self.song_filters.matches(song))
-                    .map(|song| self.to_song_view(song.clone()))
-                    .collect()
-            }
+            Page::RecentlyAdded => self
+                .all_songs
+                .iter()
+                .rev()
+                .filter(|song| self.song_filters.matches(song))
+                .map(|song| self.to_song_view(song.clone()))
+                .collect(),
             _ => {
                 let mut songs: Vec<Song> = self
                     .all_songs
@@ -861,6 +860,12 @@ impl AppCore {
         self.queue.current = Some(index);
         self.playback.play_file(&path);
         self.state.current_track_label = self.current_track_label_for_path();
+        // Populate current song info from library if available
+        if let Some(song) = self.all_songs.iter().find(|s| s.path == path) {
+            self.state.current_song_title = song.title.clone();
+            self.state.current_song_artist = song.artist.clone();
+            self.state.current_song_album = song.album.clone();
+        }
         self.state.elapsed_seconds = 0.0;
         self.state.duration_seconds = 0.0;
         self.views_dirty = true;
@@ -877,6 +882,9 @@ impl AppCore {
             self.playback.stop();
             self.queue.current = None;
             self.state.current_track_label = String::from("No track selected");
+            self.state.current_song_title = String::new();
+            self.state.current_song_artist = String::new();
+            self.state.current_song_album = String::new();
             self.state.elapsed_seconds = 0.0;
             self.state.duration_seconds = 0.0;
             self.views_dirty = true;
@@ -994,6 +1002,9 @@ impl AppCore {
         self.playback.stop();
         self.queue.clear();
         self.state.current_track_label = String::from("No track selected");
+        self.state.current_song_title = String::new();
+        self.state.current_song_artist = String::new();
+        self.state.current_song_album = String::new();
         self.state.elapsed_seconds = 0.0;
         self.state.duration_seconds = 0.0;
         self.views_dirty = true;
@@ -1019,6 +1030,9 @@ impl AppCore {
 
             self.playback.stop();
             self.state.current_track_label = String::from("No track selected");
+            self.state.current_song_title = String::new();
+            self.state.current_song_artist = String::new();
+            self.state.current_song_album = String::new();
             self.state.elapsed_seconds = 0.0;
             self.state.duration_seconds = 0.0;
         }

@@ -53,6 +53,7 @@ pub enum PlaybackEvent {
     Tags {
         title: Option<String>,
         artist: Option<String>,
+        album: Option<String>,
     },
     Error(String),
     StateChanged(PlaybackState),
@@ -297,7 +298,12 @@ fn effective_volume(volume: f64, muted: bool) -> f64 {
 fn emit_track_tags(event_tx: &mpsc::Sender<PlaybackEvent>, metadata: Option<&TrackMetadata>) {
     let title = metadata.and_then(|metadata| metadata.title.clone());
     let artist = metadata.and_then(|metadata| metadata.artist.clone());
-    let _ = event_tx.send(PlaybackEvent::Tags { title, artist });
+    let album = metadata.and_then(|metadata| metadata.album.clone());
+    let _ = event_tx.send(PlaybackEvent::Tags {
+        title,
+        artist,
+        album,
+    });
 }
 
 fn open_sink() -> Option<MixerDeviceSink> {
