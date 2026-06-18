@@ -401,7 +401,10 @@ impl AppCore {
             }
             AppIntent::Previous => {
                 if let Some(current) = self.queue.current {
-                    if current > 0 {
+                    if self.state.elapsed_seconds >= 3.0 {
+                        // Restart the current song
+                        self.play_track_at(current)
+                    } else if current > 0 {
                         self.play_track_at(current - 1)
                     } else {
                         Vec::new()
