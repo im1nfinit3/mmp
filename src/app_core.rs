@@ -404,8 +404,8 @@ impl AppCore {
                     if self.state.elapsed_seconds >= 3.0 {
                         // Restart the current song
                         self.play_track_at(current)
-                    } else if current > 0 {
-                        self.play_track_at(current - 1)
+                    } else if let Some(prev) = self.queue.previous_track() {
+                        self.play_track_at(prev)
                     } else {
                         Vec::new()
                     }
@@ -473,6 +473,9 @@ impl AppCore {
             }
             AppIntent::PlaySong(path) => {
                 let index = self.queue.push(path);
+                if self.queue.shuffle {
+                    self.queue.history.clear();
+                }
                 self.play_track_at(index)
             }
             AppIntent::QueueSong(path) => {
@@ -795,11 +798,12 @@ impl AppCore {
             .map(|s| (s.path.as_path(), s))
             .collect();
 
-        self.queue
-            .tracks
+        let indices = self.queue.display_indices();
+
+        indices
             .iter()
-            .enumerate()
-            .map(|(index, path)| {
+            .map(|&index| {
+                let path = &self.queue.tracks[index];
                 let song = song_map
                     .get(path.as_path())
                     .map(|s| (*s).clone())
@@ -864,6 +868,9 @@ impl AppCore {
     }
 
     fn advance_track(&mut self) -> Vec<AppEffect> {
+        if self.queue.shuffle {
+            self.queue.record_current_played();
+        }
         if let Some(next) = self.queue.next_track() {
             self.play_track_at(next)
         } else {
