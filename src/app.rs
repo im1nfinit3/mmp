@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iced::task::Task;
 use iced::widget::{
@@ -44,10 +44,45 @@ pub fn run() -> iced::Result {
         .run()
 }
 
+struct StatusBar {
+    /// Persistent status that overrides the idle message (e.g. scanning).
+    persistent: Option<String>,
+    /// Transient notification with expiry instant; overrides everything while active.
+    notification: Option<(String, Instant)>,
+    /// Total library track count — always shown on the right.
+    track_count: usize,
+}
+
+impl StatusBar {
+    fn new() -> Self {
+        Self {
+            persistent: None,
+            notification: None,
+            track_count: 0,
+        }
+    }
+
+    /// The current left-side text to display.
+    fn display_text(&self) -> &str {
+        if let Some((msg, _)) = &self.notification {
+            return msg;
+        }
+        if let Some(msg) = &self.persistent {
+            return msg;
+        }
+        "Ready"
+    }
+
+    /// Whether a transient notification is currently visible.
+    fn has_active_notification(&self) -> bool {
+        self.notification.is_some()
+    }
+}
+
 struct App {
     core: AppCore,
     active_modal: Option<ActiveModal>,
-    notification: Option<String>,
+    status_bar: StatusBar,
     context_menu: Option<ContextMenu>,
     cursor_position: Point,
     palette: UiPalette,
@@ -69,7 +104,6 @@ enum Message {
     ModalTextChanged(String),
     ModalConfirm,
     ModalCancel,
-    ClearNotification,
     ModifiersChanged(bool),
 }
 
@@ -78,7 +112,7 @@ fn boot(startup_palette: UiPalette) -> (App, Task<Message>) {
         App {
             core: AppCore::new(),
             active_modal: None,
-            notification: None,
+            status_bar: StatusBar::new(),
             context_menu: None,
             cursor_position: Point::ORIGIN,
             palette: startup_palette,
@@ -108,6 +142,14 @@ fn subscription(_app: &App) -> Subscription<Message> {
 }
 
 fn update(app: &mut App, message: Message) -> Task<Message> {
+    if let Message::Tick = &message {
+        if let Some((_, expires_at)) = &app.status_bar.notification {
+            if Instant::now() >= *expires_at {
+                app.status_bar.notification = None;
+            }
+        }
+    }
+
     let effects = match message {
         Message::Tick => app.core.tick(),
         Message::Intent(intent) => {
@@ -155,8 +197,7 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::ModalTextChanged(value) => {
             if let Some(modal) = app.active_modal.as_mut() {
                 match modal {
-                    ActiveModal::CreatePlaylist { name }
-                    | ActiveModal::RenamePlaylist { name, .. }
+                    ActiveModal::RenamePlaylist { name, .. }
                     | ActiveModal::CreatePlaylistAndAddSong { name, .. }
                     | ActiveModal::SaveQueueAsPlaylist { name }
                     | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => *name = value,
@@ -170,17 +211,13 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             };
 
             let should_close = match &modal {
-                ActiveModal::CreatePlaylist { name }
-                | ActiveModal::RenamePlaylist { name, .. }
+                ActiveModal::RenamePlaylist { name, .. }
                 | ActiveModal::CreatePlaylistAndAddSong { name, .. }
                 | ActiveModal::SaveQueueAsPlaylist { name }
                 | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => !name.trim().is_empty(),
             };
 
             let mut effects = match modal {
-                ActiveModal::CreatePlaylist { name } => app
-                    .core
-                    .handle_intent(AppIntent::ConfirmCreatePlaylist(name)),
                 ActiveModal::RenamePlaylist { id, name } => app
                     .core
                     .handle_intent(AppIntent::ConfirmRenamePlaylist { id, name }),
@@ -206,10 +243,6 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             effects
         }
         Message::ModalCancel => vec![AppEffect::CloseModal],
-        Message::ClearNotification => {
-            app.notification = None;
-            Vec::new()
-        }
         Message::ModifiersChanged(shift_held) => {
             app.core.set_shift_held(shift_held);
             Vec::new()
@@ -224,9 +257,20 @@ fn apply_effects(app: &mut App, effects: Vec<AppEffect>) -> Task<Message> {
         match effect {
             AppEffect::OpenModal(modal) => app.active_modal = Some(modal),
             AppEffect::CloseModal => app.active_modal = None,
-            AppEffect::ShowNotification(message) => app.notification = Some(message),
+            AppEffect::ShowNotification(message) => {
+                app.status_bar.notification = Some((
+                    message,
+                    Instant::now() + Duration::from_secs(4),
+                ));
+            }
+            AppEffect::SetPersistentStatus(status) => {
+                app.status_bar.persistent = status;
+            }
         }
     }
+
+    // Keep track count in sync
+    app.status_bar.track_count = app.core.state().total_songs;
 
     Task::none()
 }
@@ -238,15 +282,16 @@ fn view(app: &App) -> Element<'_, Message> {
     let body = mouse_area(
         container(
             column![
-                view_header(state, app.notification.as_deref(), palette),
+                view_header(state, palette),
                 row![view_nav(state, palette), view_content(state, palette)]
                     .spacing(18)
-                    .height(Length::Fill)
+                    .height(Length::Fill),
+                view_status_bar(&app.status_bar, palette),
             ]
-            .spacing(18)
+            .spacing(8)
             .height(Length::Fill),
         )
-        .padding([22, 24])
+        .padding(iced::Padding::new(22.0).bottom(12.0))
         .width(Length::Fill)
         .height(Length::Fill)
         .style(app_shell_style),
@@ -271,7 +316,6 @@ fn view(app: &App) -> Element<'_, Message> {
 
 fn view_header<'a>(
     state: &'a AppState,
-    notification: Option<&'a str>,
     palette: &'a UiPalette,
 ) -> Element<'a, Message> {
     let play_icon = match state.playback {
@@ -381,26 +425,12 @@ fn view_header<'a>(
     .align_y(Alignment::Center)
     .width(236);
 
-    let mut header = column![
+    let header = column![
         row![controls, progress, volume]
             .spacing(22)
             .align_y(Alignment::Center)
     ]
     .spacing(14);
-
-    if let Some(note) = notification.or(state.status_message.as_deref()) {
-        header = header.push(
-            row![
-                text(note).size(13),
-                button("Dismiss")
-                    .padding([6, 10])
-                    .style(ghost_button_style)
-                    .on_press(Message::ClearNotification)
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        );
-    }
 
     container(header)
         .padding([20, 22])
@@ -845,7 +875,6 @@ fn view_modal_overlay<'a>(
     palette: &'a UiPalette,
 ) -> Element<'a, Message> {
     let title = match modal {
-        ActiveModal::CreatePlaylist { .. } => "Create playlist",
         ActiveModal::RenamePlaylist { .. } => "Rename playlist",
         ActiveModal::CreatePlaylistAndAddSong { .. } => "Create playlist and add song",
         ActiveModal::SaveQueueAsPlaylist { .. } => "Save queue as playlist",
@@ -855,8 +884,7 @@ fn view_modal_overlay<'a>(
     };
 
     let body: Element<'a, Message> = match modal {
-        ActiveModal::CreatePlaylist { name }
-        | ActiveModal::RenamePlaylist { name, .. }
+        ActiveModal::RenamePlaylist { name, .. }
         | ActiveModal::CreatePlaylistAndAddSong { name, .. }
         | ActiveModal::SaveQueueAsPlaylist { name }
         | ActiveModal::CreatePlaylistAndAddAllFiltered { name } => column![
@@ -1201,6 +1229,7 @@ const COLOR_BACKDROP: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.55);
 const COLOR_SURFACE: Color = Color::from_rgb(0.12, 0.12, 0.13);
 const COLOR_SURFACE_SOFT: Color = Color::from_rgb(0.15, 0.15, 0.16);
 const COLOR_BORDER_SUBTLE: Color = Color::from_rgb(0.18, 0.18, 0.20);
+const COLOR_STATUS_BAR_BG: Color = Color::from_rgb(0.07, 0.07, 0.08);
 const WINDOW_WIDTH: f32 = 1240.0;
 const WINDOW_HEIGHT: f32 = 820.0;
 const CONTEXT_MENU_WIDTH: f32 = 220.0;
@@ -1395,6 +1424,40 @@ fn toggler_style(
         border_radius: None,
         padding_ratio: 0.3,
     }
+}
+
+fn view_status_bar<'a>(
+    status_bar: &'a StatusBar,
+    palette: &'a UiPalette,
+) -> Element<'a, Message> {
+    let left_text = status_bar.display_text();
+    let track_count = status_bar.track_count;
+
+    let right_label = if track_count == 1 {
+        "1 song".to_string()
+    } else {
+        format!("{track_count} songs")
+    };
+
+    let left_color = if status_bar.has_active_notification() {
+        palette.accent
+    } else {
+        COLOR_DIM
+    };
+
+    container(
+        row![
+            text(left_text).size(13).color(left_color),
+            Space::new().width(Length::Fill),
+            text(right_label).size(13).color(COLOR_DIM),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .padding([8, 16])
+    .width(Length::Fill)
+    .height(34)
+    .style(status_bar_panel_style)
+    .into()
 }
 
 fn menu_style(_theme: &Theme, palette: &UiPalette) -> iced::widget::overlay::menu::Style {
@@ -1628,6 +1691,20 @@ fn panel_style(background: Color, radius: f32) -> iced::widget::container::Style
         text_color: Some(COLOR_TEXT),
         border: Border {
             radius: radius.into(),
+            width: 1.0,
+            color: COLOR_BORDER_SUBTLE,
+        },
+        shadow: Shadow::default(),
+        ..Default::default()
+    }
+}
+
+fn status_bar_panel_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(Background::Color(COLOR_STATUS_BAR_BG)),
+        text_color: Some(COLOR_TEXT),
+        border: Border {
+            radius: RADIUS_PANEL.into(),
             width: 1.0,
             color: COLOR_BORDER_SUBTLE,
         },

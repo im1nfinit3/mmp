@@ -25,7 +25,6 @@ pub enum Page {
 
 #[derive(Clone, Debug)]
 pub enum ActiveModal {
-    CreatePlaylist { name: String },
     RenamePlaylist { id: i64, name: String },
     CreatePlaylistAndAddSong { path: PathBuf, name: String },
     SaveQueueAsPlaylist { name: String },
@@ -37,6 +36,7 @@ pub enum AppEffect {
     OpenModal(ActiveModal),
     CloseModal,
     ShowNotification(String),
+    SetPersistentStatus(Option<String>),
 }
 
 #[derive(Clone, Debug)]
@@ -57,12 +57,10 @@ pub enum AppIntent {
     ActivateArtist(String),
     PlaySong(PathBuf),
     QueueSong(PathBuf),
-    OpenCreatePlaylist,
     OpenRenamePlaylist { id: i64 },
     OpenCreatePlaylistAndAddSong { path: PathBuf },
     OpenSaveQueueAsPlaylist,
 
-    ConfirmCreatePlaylist(String),
     ConfirmRenamePlaylist { id: i64, name: String },
     ConfirmCreatePlaylistAndAddSong { name: String, path: PathBuf },
     ConfirmSaveQueueAsPlaylist(String),
@@ -123,7 +121,7 @@ pub struct AppState {
     pub shuffle: bool,
     pub repeat: RepeatMode,
     pub scan_started: bool,
-    pub status_message: Option<String>,
+    pub total_songs: usize,
     pub settings: Settings,
     pub default_sort: SortMethod,
 }
@@ -258,7 +256,7 @@ impl AppCore {
                 shuffle: false,
                 repeat: RepeatMode::Off,
                 scan_started: false,
-                status_message: None,
+                total_songs: 0,
                 settings: settings.clone(),
                 default_sort: settings.default_sort,
             },
@@ -352,7 +350,6 @@ impl AppCore {
                 | AppIntent::ActivateArtist(_)
                 | AppIntent::PlaySong(_)
                 | AppIntent::QueueSong(_)
-                | AppIntent::ConfirmCreatePlaylist(_)
                 | AppIntent::ConfirmRenamePlaylist { .. }
                 | AppIntent::ConfirmCreatePlaylistAndAddSong { .. }
                 | AppIntent::ConfirmSaveQueueAsPlaylist(_)
@@ -496,11 +493,6 @@ impl AppCore {
                 self.queue.push(path);
                 Vec::new()
             }
-            AppIntent::OpenCreatePlaylist => {
-                vec![AppEffect::OpenModal(ActiveModal::CreatePlaylist {
-                    name: String::new(),
-                })]
-            }
             AppIntent::OpenRenamePlaylist { id } => {
                 let name = self
                     .state
@@ -527,7 +519,6 @@ impl AppCore {
                     name: String::new(),
                 })]
             }
-            AppIntent::ConfirmCreatePlaylist(name) => self.create_playlist(&name),
             AppIntent::ConfirmRenamePlaylist { id, name } => self.rename_playlist(id, &name),
             AppIntent::ConfirmCreatePlaylistAndAddSong { name, path } => {
                 self.create_playlist_and_add_song(&name, path)
@@ -677,6 +668,7 @@ impl AppCore {
         match event {
             LibraryEvent::SongsLoaded { songs } => {
                 self.all_songs = songs;
+                self.state.total_songs = self.all_songs.len();
                 self.rebuild_cached_aggregations();
                 self.views_dirty = true;
                 Vec::new()
@@ -693,6 +685,7 @@ impl AppCore {
                         self.all_songs.push(song);
                     }
                 }
+                self.state.total_songs = self.all_songs.len();
                 self.rebuild_cached_aggregations();
                 self.views_dirty = true;
                 Vec::new()
@@ -705,15 +698,18 @@ impl AppCore {
             }
             LibraryEvent::ScanStarted => {
                 self.state.scan_started = true;
-                vec![AppEffect::ShowNotification(String::from(
-                    "Scanning music library...",
-                ))]
+                vec![AppEffect::SetPersistentStatus(Some(String::from(
+                    "⟳ Scanning music library...",
+                )))]
             }
             LibraryEvent::ScanComplete { total } => {
                 self.views_dirty = true;
-                vec![AppEffect::ShowNotification(format!(
-                    "Scan complete. {total} new tracks indexed."
-                ))]
+                vec![
+                    AppEffect::SetPersistentStatus(None),
+                    AppEffect::ShowNotification(format!(
+                        "✓ Scan complete — {total} new tracks"
+                    )),
+                ]
             }
             LibraryEvent::Error(error) => vec![AppEffect::ShowNotification(error)],
         }
@@ -923,26 +919,6 @@ impl AppCore {
             self.state.duration_seconds = 0.0;
             self.views_dirty = true;
             Vec::new()
-        }
-    }
-
-    fn create_playlist(&mut self, name: &str) -> Vec<AppEffect> {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return vec![AppEffect::ShowNotification(String::from(
-                "Playlist name cannot be empty",
-            ))];
-        }
-
-        match self.library_handle.create_playlist(trimmed) {
-            Ok(id) => {
-                self.state.playlists = self.library_handle.get_playlists();
-                self.state.page = Page::Playlist(id);
-                vec![AppEffect::ShowNotification(format!(
-                    "Created playlist \"{trimmed}\""
-                ))]
-            }
-            Err(error) => vec![AppEffect::ShowNotification(error.to_string())],
         }
     }
 
