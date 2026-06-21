@@ -993,10 +993,6 @@ fn playlist_context_menu<'a>(playlist_id: i64) -> iced::widget::Column<'a, Messa
             Message::Intent(AppIntent::QueuePlaylist(playlist_id)),
         ),
         menu_item_button(
-            "Create playlist",
-            Message::Intent(AppIntent::OpenCreatePlaylist),
-        ),
-        menu_item_button(
             "Rename playlist",
             Message::Intent(AppIntent::OpenRenamePlaylist { id: playlist_id }),
         ),
