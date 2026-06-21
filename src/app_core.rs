@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use rand::Rng;
+
 use crate::library::db::Playlist;
 use crate::library::scan;
 use crate::library::song::{RepeatMode, Song};
@@ -465,11 +467,28 @@ impl AppCore {
                 Vec::new()
             }
             AppIntent::PlaySong(path) => {
-                let index = self.queue.push(path);
-                if self.queue.shuffle {
-                    self.queue.history.clear();
+                // If the song is already in the queue, jump to it instead
+                // of creating a duplicate entry in tracks.
+                if let Some(existing_idx) = self.queue.tracks.iter().position(|p| p == &path) {
+                    if self.queue.shuffle && self.queue.current != Some(existing_idx) {
+                        // Put the interrupted current track back into the pool
+                        if let Some(current) = self.queue.current {
+                            let pos = rand::rng().random_range(0..=self.queue.unplayed_pool.len());
+                            self.queue.unplayed_pool.insert(pos, current);
+                        }
+                        // Remove the target from wherever it is (pool or history)
+                        self.queue.unplayed_pool.retain(|&i| i != existing_idx);
+                        self.queue.history.retain(|&i| i != existing_idx);
+                        self.queue.history.clear();
+                    }
+                    self.play_track_at(existing_idx)
+                } else {
+                    let index = self.queue.push(path);
+                    if self.queue.shuffle {
+                        self.queue.history.clear();
+                    }
+                    self.play_track_at(index)
                 }
-                self.play_track_at(index)
             }
             AppIntent::QueueSong(path) => {
                 self.queue.push(path);
@@ -858,6 +877,10 @@ impl AppCore {
         };
 
         self.queue.current = Some(index);
+        // Make sure this track is not in the unplayed pool — when shuffle is on,
+        // `push()` may have added it, but now that it's the current track it
+        // must only appear in history, not as an upcoming track.
+        self.queue.unplayed_pool.retain(|&i| i != index);
         self.playback.play_file(&path);
         self.state.current_track_label = self.current_track_label_for_path();
         // Populate current song info from library if available
