@@ -989,6 +989,10 @@ fn menu_item_button_variant<'a>(
 fn playlist_context_menu<'a>(playlist_id: i64) -> iced::widget::Column<'a, Message> {
     column![
         menu_item_button(
+            "Queue playlist",
+            Message::Intent(AppIntent::QueuePlaylist(playlist_id)),
+        ),
+        menu_item_button(
             "Create playlist",
             Message::Intent(AppIntent::OpenCreatePlaylist),
         ),

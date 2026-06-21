@@ -73,6 +73,7 @@ pub enum AppIntent {
     DeletePlaylist(i64),
     QueueAllFiltered,
     AddAllFilteredToPlaylist(i64),
+    QueuePlaylist(i64),
     OpenCreatePlaylistAndAddAllFiltered,
     ConfirmCreatePlaylistAndAddAllFiltered(String),
     SetLibraryFolder(String),
@@ -364,6 +365,7 @@ impl AppCore {
                 | AppIntent::AddAllFilteredToPlaylist(_)
                 | AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(_)
                 | AppIntent::SetDefaultSort(_)
+                | AppIntent::QueuePlaylist(_)
                 | AppIntent::ToggleShuffle
                 | AppIntent::ToggleRepeat
         );
@@ -575,6 +577,15 @@ impl AppCore {
                         name: String::new(),
                     },
                 )]
+            }
+            AppIntent::QueuePlaylist(id) => {
+                let songs = self.library_handle.get_playlist_songs(id);
+                let count = songs.len();
+                for song in songs {
+                    self.queue.push(song.path);
+                }
+                self.views_dirty = true;
+                vec![AppEffect::ShowNotification(format!("Queued {count} songs from playlist"))]
             }
             AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name) => {
                 self.create_playlist_and_add_all_filtered(&name)
