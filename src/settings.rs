@@ -1,10 +1,14 @@
-//! Persistent application settings stored via SQLite (key-value).
+//! Persistent application settings stored as a TOML config file.
+//!
+//! The file lives at `~/.config/mmp/mmp.conf` and is human-editable.
+//! Hand-written comments are preserved on round-trip (only known keys
+//! are overwritten; everything else in the file passes through).
 
-use rusqlite::{Connection, params};
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 
-use crate::app_core::Page;
+use crate::core::Page;
 use crate::library::db;
 use crate::library::song::Song;
 
@@ -15,24 +19,31 @@ use crate::library::song::Song;
 /// Errors that can occur when reading or writing settings.
 #[derive(Debug)]
 pub enum SettingsError {
-    /// A database operation failed.
-    Db(String),
-    /// Failed to save a specific setting key.
-    Save { key: String, detail: String },
+    /// An I/O error occurred (read/write/create dir).
+    Io(String),
+    /// A value in the config file could not be parsed.
+    #[allow(dead_code)]
+    Parse { key: String, detail: String },
 }
 
 impl fmt::Display for SettingsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Db(msg) => write!(f, "{msg}"),
-            Self::Save { key, detail } => {
-                write!(f, "Failed to save setting '{key}': {detail}")
+            Self::Io(msg) => write!(f, "{msg}"),
+            Self::Parse { key, detail } => {
+                write!(f, "Invalid value for '{key}': {detail}")
             }
         }
     }
 }
 
 impl std::error::Error for SettingsError {}
+
+impl From<std::io::Error> for SettingsError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e.to_string())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Sort method for song-list views
@@ -120,6 +131,10 @@ impl SortMethod {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Settings model
+// ---------------------------------------------------------------------------
+
 /// The application settings surfaced in the Settings page.
 #[derive(Clone, Debug)]
 pub struct Settings {
@@ -188,81 +203,104 @@ impl Settings {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence
+// Persistence (TOML via toml_edit, format-preserving)
 // ---------------------------------------------------------------------------
 
-const SETTINGS_DB_FILENAME: &str = "settings.db";
-const SETTINGS_DDL: &str = "
-CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-";
+const CONFIG_FILENAME: &str = "mmp.conf";
 
-/// Open (or create) the settings database.
-fn open_settings_db() -> Result<Connection, SettingsError> {
-    let path = db::config_dir().join(SETTINGS_DB_FILENAME);
-    let conn = Connection::open(&path)
-        .map_err(|e| SettingsError::Db(format!("Failed to open settings db: {e}")))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
-    conn.execute_batch(SETTINGS_DDL)
-        .map_err(|e| SettingsError::Db(format!("Failed to create settings table: {e}")))?;
-    Ok(conn)
+/// Full path to the config file.
+fn config_path() -> PathBuf {
+    db::config_dir().join(CONFIG_FILENAME)
 }
 
-/// Load settings from the database. Returns `Default` if the DB or row is missing.
+/// Load settings from `~/.config/mmp/mmp.conf`.
+///
+/// Returns `Default` if the file is missing, empty, or unreadable.
 pub fn load_settings() -> Settings {
-    let Ok(conn) = open_settings_db() else {
-        return Settings::default();
+    let path = config_path();
+
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return Settings::default(),
     };
 
-    let get_str = |key: &str| -> Option<String> {
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            params![key],
-            |row| row.get(0),
-        )
-        .ok()
+    // Strip UTF-8 BOM if present (Windows Notepad compat).
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+
+    let doc: toml_edit::DocumentMut = match text.parse() {
+        Ok(d) => d,
+        Err(_) => return Settings::default(),
     };
 
     Settings {
-        library_folder: get_str("library_folder"),
-        scan_on_startup: get_str("scan_on_startup")
-            .and_then(|v| v.parse::<bool>().ok())
+        library_folder: doc
+            .get("library_folder")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+
+        scan_on_startup: doc
+            .get("scan_on_startup")
+            .and_then(|v| v.as_bool())
             .unwrap_or(true),
-        default_view: get_str("default_view")
-            .filter(|v| Settings::ALL_VIEWS.contains(&v.as_str()))
+
+        default_view: doc
+            .get("default_view")
+            .and_then(|v| v.as_str())
+            .filter(|v| Settings::ALL_VIEWS.contains(v))
+            .map(String::from)
             .unwrap_or_else(|| String::from("RecentlyAdded")),
-        default_sort: get_str("default_sort").map_or(SortMethod::TimeAddedNewestFirst, |v| {
-            SortMethod::from_str(&v)
-        }),
+
+        default_sort: doc
+            .get("default_sort")
+            .and_then(|v| v.as_str())
+            .map(SortMethod::from_str)
+            .unwrap_or(SortMethod::TimeAddedNewestFirst),
     }
 }
 
-/// Persist the given settings to the database.
+/// Persist settings to `~/.config/mmp/mmp.conf`.
+///
+/// This is format-preserving: any existing keys, comments, or formatting
+/// in the file that aren't known settings are passed through unchanged.
 pub fn save_settings(settings: &Settings) -> Result<(), SettingsError> {
-    let conn = open_settings_db()?;
+    let path = config_path();
+    let dir = path.parent().unwrap();
+    fs::create_dir_all(dir)?;
 
-    let upsert = |key: &str, value: &str| -> Result<(), SettingsError> {
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )
-        .map_err(|e| SettingsError::Save {
-            key: key.to_string(),
-            detail: e.to_string(),
-        })?;
-        Ok(())
+    // Try to load the existing document to preserve comments/formatting.
+    let (mut doc, created) = match fs::read_to_string(&path) {
+        Ok(text) => match text.parse::<toml_edit::DocumentMut>() {
+            Ok(d) => (d, false),
+            Err(_) => (toml_edit::DocumentMut::new(), true),
+        },
+        Err(_) => (toml_edit::DocumentMut::new(), true),
     };
 
-    upsert(
-        "library_folder",
+    // Write each known key.
+    doc["library_folder"] = toml_edit::value(
         settings.library_folder.as_deref().unwrap_or(""),
-    )?;
-    upsert("scan_on_startup", &settings.scan_on_startup.to_string())?;
-    upsert("default_view", &settings.default_view)?;
-    upsert("default_sort", settings.default_sort.as_str())?;
+    );
+    doc["scan_on_startup"] = toml_edit::value(settings.scan_on_startup);
+    doc["default_view"] = toml_edit::value(&settings.default_view);
+    doc["default_sort"] = toml_edit::value(settings.default_sort.as_str());
+
+    // Serialize and prepend the header comment for brand-new files.
+    let mut content = doc.to_string();
+    if created {
+        content = format!(
+            "# mmp configuration — edit while the app is closed.\n\
+             # Settings changed in the app will overwrite this file.\n\
+             # Unrecognised keys are preserved.\n\
+             \n\
+             {content}"
+        );
+    }
+
+    // Atomic write: tmp file + rename.
+    let tmp_path = dir.join("mmp.conf.tmp");
+    fs::write(&tmp_path, content)?;
+    fs::rename(&tmp_path, &path)?;
 
     Ok(())
 }
