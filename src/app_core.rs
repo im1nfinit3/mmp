@@ -74,6 +74,7 @@ pub enum AppIntent {
     QueuePlaylist(i64),
     OpenCreatePlaylistAndAddAllFiltered,
     ConfirmCreatePlaylistAndAddAllFiltered(String),
+    ForceRescan,
     SetLibraryFolder(String),
     SetScanOnStartup(bool),
     SetDefaultView(String),
@@ -211,6 +212,8 @@ pub struct AppCore {
     /// In-memory cache of playlist → song membership, rebuilt on PlaylistsChanged.
     /// Maps playlist_id → set of song paths.
     playlist_song_cache: HashMap<i64, HashSet<PathBuf>>,
+    /// Captured playlist–song pairs to re-link after a rescan.
+    pending_playlist_pairs: Option<Vec<(i64, PathBuf)>>,
     /// Tracks whether the Shift key is held (for alternate button behaviour).
     shift_held: bool,
 }
@@ -267,6 +270,7 @@ impl AppCore {
             cached_artists: Vec::new(),
             cached_albums: Vec::new(),
             playlist_song_cache: HashMap::new(),
+            pending_playlist_pairs: None,
             shift_held: false,
         };
         core.refresh_library_views();
@@ -363,6 +367,7 @@ impl AppCore {
                 | AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(_)
                 | AppIntent::SetDefaultSort(_)
                 | AppIntent::QueuePlaylist(_)
+                | AppIntent::ForceRescan
                 | AppIntent::ToggleShuffle
                 | AppIntent::ToggleRepeat
         );
@@ -581,6 +586,32 @@ impl AppCore {
             AppIntent::ConfirmCreatePlaylistAndAddAllFiltered(name) => {
                 self.create_playlist_and_add_all_filtered(&name)
             }
+            AppIntent::ForceRescan => {
+                // Snapshot existing playlist–song pairs before purge
+                let playlist_pairs: Vec<(i64, PathBuf)> = self
+                    .state
+                    .playlists
+                    .iter()
+                    .flat_map(|playlist| {
+                        let songs = self.library_handle.get_playlist_songs(playlist.id);
+                        songs.into_iter().map(move |s| (playlist.id, s.path))
+                    })
+                    .collect();
+
+                self.state.scan_started = true;
+                self.library_handle.purge_all_songs();
+                let folder = self.state.settings.effective_library_folder();
+                scan::start_scan(
+                    self.library_handle.clone(),
+                    self.library_event_tx.clone(),
+                    Some(folder),
+                );
+
+                // Stash pairs for re-association after scan completes
+                self.pending_playlist_pairs = Some(playlist_pairs);
+
+                Vec::new()
+            }
             AppIntent::SetLibraryFolder(folder) => {
                 self.state.settings.library_folder = if folder.trim().is_empty() {
                     None
@@ -703,6 +734,10 @@ impl AppCore {
                 )))]
             }
             LibraryEvent::ScanComplete { total } => {
+                // Re-associate playlist songs now that the scan is done
+                if let Some(pairs) = self.pending_playlist_pairs.take() {
+                    self.library_handle.reassociate_playlist_songs(pairs);
+                }
                 self.views_dirty = true;
                 vec![
                     AppEffect::SetPersistentStatus(None),

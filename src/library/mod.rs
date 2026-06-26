@@ -86,6 +86,13 @@ enum LibraryCommand {
         playlist_id: i64,
         reply: mpsc::Sender<Vec<Song>>,
     },
+    /// Purge all songs from the library (both database and in-memory).
+    PurgeAllSongs,
+    /// Re-associate playlist–song pairs after a rescan.
+    ReAssociatePlaylistSongs {
+        /// (playlist_id, song_path) pairs captured before the purge.
+        pairs: Vec<(i64, PathBuf)>,
+    },
     /// Stop the actor thread.
     Shutdown,
 }
@@ -205,6 +212,19 @@ impl LibraryHandle {
             .tx
             .send(LibraryCommand::GetPlaylistSongs { playlist_id, reply });
         rx.recv().unwrap_or_default()
+    }
+
+    /// Purge all songs from the library (fire-and-forget).
+    pub fn purge_all_songs(&self) {
+        let _ = self.inner.tx.send(LibraryCommand::PurgeAllSongs);
+    }
+
+    /// Re-associate playlist–song pairs after a rescan (fire-and-forget).
+    pub fn reassociate_playlist_songs(&self, pairs: Vec<(i64, PathBuf)>) {
+        let _ = self
+            .inner
+            .tx
+            .send(LibraryCommand::ReAssociatePlaylistSongs { pairs });
     }
 }
 
@@ -451,6 +471,43 @@ pub fn spawn(event_tx: mpsc::Sender<LibraryEvent>) -> LibraryHandle {
                         }
                     };
                     let _ = reply.send(result);
+                }
+
+                LibraryCommand::ReAssociatePlaylistSongs { pairs } => {
+                    let mut re_linked = 0usize;
+                    for (playlist_id, path) in &pairs {
+                        if let Some(&idx) = by_path.get(path) {
+                            if let Some(conn) = &playlists_db {
+                                if db::add_song_to_playlist(conn, *playlist_id, &songs[idx]).is_ok()
+                                {
+                                    re_linked += 1;
+                                }
+                            }
+                        }
+                    }
+                    if re_linked > 0 {
+                        let _ = event_tx.send(LibraryEvent::PlaylistsChanged);
+                    }
+                }
+
+                LibraryCommand::PurgeAllSongs => {
+                    // Clear songs from library DB
+                    if let Some(conn) = &library_db {
+                        let _ = conn.execute_batch("DELETE FROM songs");
+                    }
+                    // Clear playlist_songs from playlists DB
+                    // (cascade doesn't apply across separate DB files)
+                    if let Some(conn) = &playlists_db {
+                        let _ = conn.execute_batch("DELETE FROM playlist_songs");
+                    }
+                    // Clear in-memory state
+                    songs.clear();
+                    by_path.clear();
+                    // Notify UI
+                    let _ = event_tx.send(LibraryEvent::SongsLoaded {
+                        songs: Vec::new(),
+                    });
+                    let _ = event_tx.send(LibraryEvent::PlaylistsChanged);
                 }
 
                 LibraryCommand::Shutdown => break,

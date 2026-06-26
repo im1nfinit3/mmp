@@ -793,7 +793,11 @@ fn view_settings<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a,
             text("Settings").size(22),
             Space::new().height(16),
             text("Library folder").size(16).color(COLOR_DIM),
-            text_input("Default: ~/Music (or your system audio dir)", &folder_value,)
+            row![
+                text_input(
+                    "Default: ~/Music (or your system audio dir)",
+                    &folder_value,
+                )
                 .on_input(|value| Message::Intent(AppIntent::SetLibraryFolder(value)))
                 .padding([10, 14])
                 .width(600)
@@ -801,6 +805,13 @@ fn view_settings<'a>(state: &'a AppState, palette: &'a UiPalette) -> Element<'a,
                     let palette = *palette;
                     move |theme, status| search_input_style(theme, status, &palette)
                 }),
+                button(text("Rescan").size(14))
+                    .padding([10, 14])
+                    .style(ghost_button_style)
+                    .on_press(Message::Intent(AppIntent::ForceRescan)),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
             text("Leave empty to use your system's default Music directory.",)
                 .size(13)
                 .color(COLOR_DIM),
