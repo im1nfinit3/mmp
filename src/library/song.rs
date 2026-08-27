@@ -12,7 +12,7 @@ pub struct Song {
     pub title: String,
     pub artist: String,
     pub album: String,
-    pub duration_str: String,
+    pub duration_secs: u64,
     /// Database row id (0 if not yet persisted).
     pub db_id: i64,
 }
@@ -25,7 +25,7 @@ impl Song {
             title: filename,
             artist: String::from(UNKNOWN_ARTIST),
             album: String::from(UNKNOWN_ALBUM),
-            duration_str: String::new(),
+            duration_secs: 0,
             db_id: 0,
         }
     }
@@ -34,7 +34,7 @@ impl Song {
         self.title != fallback_title_for_path(&self.path)
             && self.artist != UNKNOWN_ARTIST
             && self.album != UNKNOWN_ALBUM
-            && !self.duration_str.is_empty()
+            && self.duration_secs > 0
     }
 }
 
