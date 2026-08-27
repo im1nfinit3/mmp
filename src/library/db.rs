@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use super::song::Song;
 
-pub const CURRENT_METADATA_VERSION: i64 = 2;
+pub const CURRENT_METADATA_VERSION: i64 = 3;
 
 /// A named playlist from the database.
 #[derive(Clone, Debug)]
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS songs (
     title TEXT,
     artist TEXT,
     album TEXT,
-    duration_str TEXT,
+    duration_secs INTEGER,
     file_size INTEGER,
     modified_unix_ms INTEGER,
     metadata_version INTEGER NOT NULL DEFAULT 0
@@ -83,6 +83,12 @@ fn ensure_song_cache_columns(conn: &Connection) -> SqlResult<()> {
         [],
     )
     .ok();
+    // v2 -> v3: replace `duration_str TEXT` with `duration_secs INTEGER`.
+    // Both statements are best-effort: fresh DBs already have `duration_secs`
+    // via SONGS_DDL (and never had `duration_str`).
+    conn.execute("ALTER TABLE songs ADD COLUMN duration_secs INTEGER", [])
+        .ok();
+    conn.execute("ALTER TABLE songs DROP COLUMN duration_str", []).ok();
     Ok(())
 }
 
@@ -99,7 +105,7 @@ pub fn save_song(conn: &Connection, song: &Song) -> SqlResult<()> {
             title,
             artist,
             album,
-            duration_str,
+            duration_secs,
             file_size,
             modified_unix_ms,
             metadata_version
@@ -109,7 +115,7 @@ pub fn save_song(conn: &Connection, song: &Song) -> SqlResult<()> {
             title = excluded.title,
             artist = excluded.artist,
             album = excluded.album,
-            duration_str = excluded.duration_str,
+            duration_secs = excluded.duration_secs,
             file_size = excluded.file_size,
             modified_unix_ms = excluded.modified_unix_ms,
             metadata_version = excluded.metadata_version",
@@ -118,7 +124,7 @@ pub fn save_song(conn: &Connection, song: &Song) -> SqlResult<()> {
             song.title,
             song.artist,
             song.album,
-            song.duration_str,
+            song.duration_secs as i64,
             fingerprint.map(|f| f.file_size as i64),
             fingerprint.and_then(|f| f.modified_unix_ms),
             fingerprint.map_or(0, |f| f.metadata_version),
@@ -147,7 +153,7 @@ pub fn get_metadata_cache(
     conn: &Connection,
 ) -> SqlResult<std::collections::HashMap<PathBuf, FileFingerprint>> {
     let mut stmt = conn.prepare(
-        "SELECT path, title, artist, album, duration_str,
+        "SELECT path, title, artist, album, duration_secs,
                 file_size, modified_unix_ms, metadata_version
          FROM songs
          WHERE file_size IS NOT NULL
@@ -161,7 +167,7 @@ pub fn get_metadata_cache(
             title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
             album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            duration_str: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            duration_secs: row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as u64,
         };
         let file_size: i64 = row.get(5)?;
         Ok((
@@ -187,7 +193,7 @@ pub fn get_metadata_cache(
 /// Load every cached song from the library database.
 pub fn get_all_songs(conn: &Connection) -> SqlResult<Vec<Song>> {
     let mut stmt =
-        conn.prepare("SELECT id, path, title, artist, album, duration_str FROM songs")?;
+        conn.prepare("SELECT id, path, title, artist, album, duration_secs FROM songs")?;
     let rows = stmt.query_map([], |row| {
         Ok(Song {
             db_id: row.get(0)?,
@@ -195,7 +201,7 @@ pub fn get_all_songs(conn: &Connection) -> SqlResult<Vec<Song>> {
             title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
             artist: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             album: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            duration_str: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            duration_secs: row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0) as u64,
         })
     })?;
 
@@ -306,7 +312,7 @@ pub fn remove_song_from_playlist(
 /// Load all songs in a playlist, in position order.
 pub fn get_playlist_songs(conn: &Connection, playlist_id: i64) -> SqlResult<Vec<Song>> {
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.path, s.title, s.artist, s.album, s.duration_str
+        "SELECT s.id, s.path, s.title, s.artist, s.album, s.duration_secs
          FROM songs s
          JOIN playlist_songs ps ON s.id = ps.song_id
          WHERE ps.playlist_id = ?1
@@ -320,7 +326,7 @@ pub fn get_playlist_songs(conn: &Connection, playlist_id: i64) -> SqlResult<Vec<
             title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
             artist: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             album: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            duration_str: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            duration_secs: row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0) as u64,
         })
     })?;
 

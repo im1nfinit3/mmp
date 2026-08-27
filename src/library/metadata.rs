@@ -69,7 +69,7 @@ impl TrackMetadata {
             song.album = album.clone();
         }
         if let Some(duration) = self.duration {
-            song.duration_str = format_duration(duration);
+            song.duration_secs = duration.as_secs();
         }
     }
 }

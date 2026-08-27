@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use rand::Rng;
 
+use crate::library::metadata::format_duration;
 use crate::library::scan;
 use crate::library::song::{RepeatMode, Song};
 use crate::library::{LibraryEvent, LibraryHandle};
@@ -706,7 +707,11 @@ impl AppCore {
             title: song.title,
             artist: song.artist,
             album: song.album,
-            duration: song.duration_str,
+            duration: if song.duration_secs > 0 {
+                format_duration(Duration::from_secs(song.duration_secs))
+            } else {
+                String::new()
+            },
             queue_index: None,
         }
     }
@@ -923,7 +928,7 @@ mod tests {
             title: title.to_string(),
             artist: artist.to_string(),
             album: album.to_string(),
-            duration_str: String::from("3:00"),
+            duration_secs: 180,
             db_id: 0,
         }
     }
