@@ -292,7 +292,14 @@ fn apply_effective_volume(active: Option<&ActivePlayback>, volume: f64, muted: b
 }
 
 fn effective_volume(volume: f64, muted: bool) -> f64 {
-    if muted { 0.0 } else { volume }
+    if muted {
+        0.0
+    } else {
+        // The slider keeps a linear 0.0..=1.0 value for display, but human
+        // loudness perception is roughly logarithmic, so apply quadratic
+        // scaling to the actual output gain for a more useful slider range.
+        volume * volume
+    }
 }
 
 fn emit_track_tags(event_tx: &mpsc::Sender<PlaybackEvent>, metadata: Option<&TrackMetadata>) {
